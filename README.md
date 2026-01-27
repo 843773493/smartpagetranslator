@@ -1,6 +1,6 @@
 # Smart Page Translator
 
-仓库： https://github.com/843773493/smartpagetranslator
+仓库：[https://github.com/843773493/smartpagetranslator](https://github.com/843773493/smartpagetranslator)
 
 在 VS Code 编辑器标题栏添加翻译按钮，可将当前文本从英文翻译为中文。
 
