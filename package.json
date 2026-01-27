@@ -3,9 +3,10 @@
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
   "version": "0.0.1",
+  "publisher": "843773493",
   "repository": {
     "type": "git",
-    "url": "https://github.com/<your-org>/<your-repo>.git"
+    "url": "https://github.com/843773493/smartpagetranslator.git"
   },
   "engines": {
     "vscode": "^1.90.0"
