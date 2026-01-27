@@ -1,0 +1,22 @@
+# Node
+node_modules/
+
+# Output
+out/
+dist/
+
+# VS Code
+.vscode/
+.vscode-test/
+
+# Build artifacts
+build/
+*.vsix
+
+# Misc
+coverage/
+.env
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

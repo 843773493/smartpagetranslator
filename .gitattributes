@@ -1,0 +1,5 @@
+# Auto detect text/binary
+* text=auto
+
+# Treat vsix as binary
+*.vsix binary

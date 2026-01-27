@@ -1,0 +1,73 @@
+{
+  "name": "smart-page-translator",
+  "displayName": "Smart Page Translator",
+  "description": "Translate text in editor from English to Chinese",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<your-org>/<your-repo>.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "smartPageTranslator.translate",
+        "title": "Translate to Chinese",
+        "icon": "$(file-text)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "smartPageTranslator.translate",
+          "group": "navigation",
+          "title": "Translate to Chinese (Create zh-CN file)"
+        }
+      ]
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Smart Page Translator",
+      "properties": {
+        "smartPageTranslator.concurrency": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Maximum number of concurrent chunk translations (default: 20)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "package": "node ./scripts/package-vsix.js",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "16.x",
+    "@types/vscode": "^1.90.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.3.9",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vsce": "^2.10.0"
+  },
+  "dependencies": {
+    "bing-translate-api": "^3.0.1"
+  }
+}
