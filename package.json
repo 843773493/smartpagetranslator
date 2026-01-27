@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.0.1",
+  "version": "0.1.7",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -25,7 +25,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:smartPageTranslator.translate"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -62,7 +63,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "package": "node ./scripts/package-vsix.js",
+    "package": "npm run compile && node ./scripts/package-vsix.js",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src --ext ts",
