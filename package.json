@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -26,7 +26,8 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:smartPageTranslator.translate"
+    "onCommand:smartPageTranslator.translate",
+    "onCommand:smartPageTranslator.extractAstOutline"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -35,9 +36,21 @@
         "command": "smartPageTranslator.translate",
         "title": "Translate to Chinese",
         "icon": "$(file-text)"
+      },
+      {
+        "command": "smartPageTranslator.extractAstOutline",
+        "title": "生成代码结构上下文",
+        "category": "Smart Page Translator"
       }
     ],
     "menus": {
+      "editor/context": [
+        {
+          "command": "smartPageTranslator.extractAstOutline",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|mjs|cjs|ts|tsx|py)$/",
+          "group": "navigation@100"
+        }
+      ],
       "editor/title": [
         {
           "command": "smartPageTranslator.translate",
@@ -54,8 +67,14 @@
           "type": "number",
           "default": 20,
           "minimum": 1,
-          "maximum": 100,
-          "description": "Maximum number of concurrent chunk translations (default: 20)."
+          "description": "Maximum number of concurrent chunk translations."
+        },
+        "smartPageTranslator.maxChunk": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 100,
+          "maximum": 10000,
+          "description": "Maximum chunk length (in characters) when splitting text for translation. Default is 1000."
         }
       }
     }
@@ -75,11 +94,16 @@
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vscode/test-electron": "^2.3.9",
+    "@babel/parser": "^7.29.2",
+    "@babel/traverse": "^7.29.0",
     "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
+    "typescript": "^5.9.3",
     "vsce": "^2.10.0"
   },
   "dependencies": {
     "bing-translate-api": "^3.0.1"
-  }
+  },
+  "files": [
+    "scripts/**/*"
+  ]
 }

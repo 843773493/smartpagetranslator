@@ -5,6 +5,14 @@ import * as vscode from 'vscode';
 export function activate(context: vscode.ExtensionContext) {
     console.log('Smart Page Translator is now active');
 
+    const output = vscode.window.createOutputChannel('Smart Page Translator');
+    context.subscriptions.push(output);
+
+    // 简单日志封装：带 ISO 时间戳与文件/任务前缀
+    function log(label: string, message: string) {
+        output.appendLine(`[${new Date().toISOString()}] [${label}] ${message}`);
+    }
+
     // 注册翻译命令
     let disposable = vscode.commands.registerCommand(
         'smartPageTranslator.translate',
@@ -22,8 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
                         if (tabUri && tabUri.scheme === 'file') {
                             try {
                                 document = await vscode.workspace.openTextDocument(tabUri);
-                                const output = vscode.window.createOutputChannel('Smart Page Translator');
-                                output.appendLine(`[Translator] Using file from active tab: ${tabUri.fsPath}`);
+                                log(path.basename(tabUri.fsPath), `Using file from active tab: ${tabUri.fsPath}`);
                             } catch (e) {
                                 // ignore and fall back
                             }
@@ -61,20 +68,24 @@ export function activate(context: vscode.ExtensionContext) {
                         cancellable: true,
                     },
                     async (progress, token) => {
-                        const output = vscode.window.createOutputChannel('Smart Page Translator');
                         output.clear();
                         output.show(true);
-                        output.appendLine(`[Translator] Translating document: ${document.fileName}`);
+                        const docLabel = path.basename(document.fileName);
+                        log(docLabel, `Translating document: ${document.fileName}`);
 
                         token.onCancellationRequested(() => {
-                            output.appendLine('[Translator] Cancellation requested by user');
+                            log(docLabel, 'Cancellation requested by user');
                         });
 
                         try {
                             progress.report({ message: 'Preparing and splitting text...' });
 
                             // 将文本拆分为不超过 MAX_CHUNK 的块（尽量保留完整单词）
-                            const MAX_CHUNK = 1000;
+                            // 从用户设置读取最大分块长度（默认 1000）
+                            const settings = vscode.workspace.getConfiguration('smartPageTranslator');
+                            const userMaxChunk = settings.get<number>('maxChunk', 1000);
+                            const MAX_CHUNK = Math.max(100, Math.min(10000, Math.floor(Number(userMaxChunk) || 1000)));
+                            log(docLabel, `Using max chunk size: ${MAX_CHUNK}`);
                             function chunkText(t: string, maxLen = MAX_CHUNK): string[] {
                                 // 使用基于空白的分割以避免拆断单词
                                 const tokens = t.split(/(\s+)/);
@@ -102,14 +113,14 @@ export function activate(context: vscode.ExtensionContext) {
                             }
 
                             const chunks = chunkText(text, MAX_CHUNK);
-                            output.appendLine(`[Translator] Total chunks: ${chunks.length}`);
+                            log(docLabel, `Total chunks: ${chunks.length}`);
 
                             // 批量翻译分块以控制并发并支持取消
                             async function translateChunks(chunks: string[], concurrency = 4): Promise<string> {
                                 const results: string[] = new Array(chunks.length);
                                 for (let i = 0; i < chunks.length; i += concurrency) {
                                     if (token.isCancellationRequested) {
-                                        output.appendLine('[Translator] Aborting before starting next batch due to cancellation');
+                                        log(docLabel, 'Aborting before starting next batch due to cancellation');
                                         throw new Error('Cancelled');
                                     }
 
@@ -118,11 +129,11 @@ export function activate(context: vscode.ExtensionContext) {
                                         return translate(chunk, null, 'zh-Hans')
                                             .then(res => {
                                                 results[index] = res.translation ?? '';
-                                                output.appendLine(`[Translator] Chunk ${index + 1}/${chunks.length} translated (len=${results[index].length})`);
+                                                log(docLabel, `Chunk ${index + 1}/${chunks.length} translated (len=${results[index].length})`);
                                                 progress.report({ message: `Translating chunk ${index + 1}/${chunks.length}` });
                                             })
                                             .catch(err => {
-                                                output.appendLine(`[Translator] Error translating chunk ${index + 1}: ${String(err)}`);
+                                                log(docLabel, `Error translating chunk ${index + 1}: ${String(err)}`);
                                                 results[index] = '';
                                             });
                                     });
@@ -133,21 +144,20 @@ export function activate(context: vscode.ExtensionContext) {
                             }
 
                             // 从用户设置读取并发数（默认 20）
-                            const cfg = vscode.workspace.getConfiguration('smartPageTranslator');
-                            const userConcurrency = cfg.get<number>('concurrency', 20);
+                            const userConcurrency = settings.get<number>('concurrency', 20);
                             const concurrency = Math.max(1, Math.min(100, Math.floor(userConcurrency)));
-                            output.appendLine(`[Translator] Using concurrency: ${concurrency}`);
+                            log(docLabel, `Using concurrency: ${concurrency}`);
 
                             let translatedText: string;
                             try {
                                 translatedText = await translateChunks(chunks, concurrency);
                             } catch (err) {
                                 if (String(err).includes('Cancelled')) {
-                                    output.appendLine('[Translator] Translation cancelled by user');
+                                    log(docLabel, 'Translation cancelled by user');
                                     vscode.window.showInformationMessage('Translation cancelled');
                                     return;
                                 }
-                                output.appendLine(`[Translator] Fatal error translating chunks: ${String(err)}`);
+                                log(docLabel, `Fatal error translating chunks: ${String(err)}`);
                                 throw err;
                             }
 
@@ -169,7 +179,7 @@ export function activate(context: vscode.ExtensionContext) {
                                     edit.insert(new vscode.Position(0, 0), translatedText);
                                 });
 
-                                output.appendLine(`[Translator] Translation complete, opened in unsaved editor: ${suggestedPath}`);
+                                log(docLabel, `Translation complete, opened in unsaved editor: ${suggestedPath}`);
                                 vscode.window.showInformationMessage(
                                     `✅ Translation complete! Opened: ${path.basename(suggestedPath)} (unsaved)`
                                 );
@@ -178,7 +188,7 @@ export function activate(context: vscode.ExtensionContext) {
                                 const newDoc = await vscode.workspace.openTextDocument({ content: translatedText, language: document.languageId });
                                 await vscode.window.showTextDocument(newDoc);
 
-                                output.appendLine('[Translator] Translation complete, opened in new untitled editor (unsaved)');
+                                log(docLabel, 'Translation complete, opened in new untitled editor (unsaved)');
                                 vscode.window.showInformationMessage('✅ Translation complete! Opened translated content in a new unsaved editor');
                             }
                         } catch (error) {
@@ -201,6 +211,60 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(disposable);
+
+    // 注册 AST outline 提取命令
+    const extractAstDisposable = vscode.commands.registerCommand(
+        'smartPageTranslator.extractAstOutline',
+        async () => {
+            try {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showErrorMessage('No active editor');
+                    return;
+                }
+
+                const document = editor.document;
+                const filePath = document.uri.fsPath;
+
+                const ext = path.extname(filePath).toLowerCase();
+                const supportedExts = ['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.py'];
+                if (!supportedExts.includes(ext)) {
+                    vscode.window.showErrorMessage(`Unsupported file type: ${ext}`);
+                    return;
+                }
+
+                log('AST', `Extracting outline from: ${filePath}`);
+
+                const scriptPath = path.join(context.extensionPath, 'scripts', 'extract-ast.mjs');
+                if (!require('fs').existsSync(scriptPath)) {
+                    vscode.window.showErrorMessage('extract-ast.mjs script not found');
+                    return;
+                }
+
+                const { spawnSync } = require('child_process');
+                const output = spawnSync('node', [scriptPath, filePath], {
+                    encoding: 'utf8',
+                    maxBuffer: 10 * 1024 * 1024,
+                });
+
+                if (output.error || output.status !== 0) {
+                    const errorMsg = output.error?.message || output.stderr || 'Failed to extract AST';
+                    vscode.window.showErrorMessage(`Error: ${errorMsg}`);
+                    return;
+                }
+
+                const outline = output.stdout;
+                await vscode.env.clipboard.writeText(outline);
+                vscode.window.showInformationMessage('AST outline copied to clipboard!');
+                log('AST', 'Outline copied to clipboard');
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                vscode.window.showErrorMessage(`❌ Error: ${errorMessage}`);
+            }
+        }
+    );
+
+    context.subscriptions.push(extractAstDisposable);
 }
 
 export function deactivate() {
