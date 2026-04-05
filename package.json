@@ -48,7 +48,7 @@
         {
           "command": "smartPageTranslator.extractAstOutline",
           "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|mjs|cjs|ts|tsx|py)$/",
-          "group": "navigation@100"
+          "group": "9_copypaste@10"
         }
       ],
       "editor/title": [
