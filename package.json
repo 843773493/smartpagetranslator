@@ -39,16 +39,15 @@
       },
       {
         "command": "smartPageTranslator.extractAstOutline",
-        "title": "生成代码结构上下文",
+        "title": "复制代码结构上下文",
         "category": "Smart Page Translator"
       }
     ],
     "menus": {
-      "editor/context": [
+      "editor/context/copy": [
         {
           "command": "smartPageTranslator.extractAstOutline",
-          "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|mjs|cjs|ts|tsx|py)$/",
-          "group": "9_copypaste@10"
+          "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|mjs|cjs|ts|tsx|py)$/"
         }
       ],
       "editor/title": [
