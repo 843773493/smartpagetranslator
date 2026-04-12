@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -24,10 +24,11 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
+    "activationEvents": [
     "onStartupFinished",
     "onCommand:smartPageTranslator.translate",
-    "onCommand:smartPageTranslator.extractAstOutline"
+    "onCommand:smartPageTranslator.extractAstOutline",
+    "onCommand:smartPageTranslator.runWithTsx"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -41,9 +42,32 @@
         "command": "smartPageTranslator.extractAstOutline",
         "title": "复制代码结构上下文",
         "category": "Smart Page Translator"
+      },
+      {
+        "command": "smartPageTranslator.runWithTsx",
+        "title": "用tsx运行",
+        "category": "Smart Page Translator"
       }
     ],
     "menus": {
+      "explorer/context": [
+        {
+          "command": "smartPageTranslator.runWithTsx",
+          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "smartPageTranslator.runWithTsx",
+          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "smartPageTranslator.runWithTsx",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+        }
+      ],
       "editor/context/copy": [
         {
           "command": "smartPageTranslator.extractAstOutline",

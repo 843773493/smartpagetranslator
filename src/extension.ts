@@ -265,6 +265,71 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(extractAstDisposable);
+
+    // 注册 tsx 运行命令
+    const runWithTsxDisposable = vscode.commands.registerCommand(
+        'smartPageTranslator.runWithTsx',
+        async (uri?: vscode.Uri) => {
+            try {
+                let targetUri = uri;
+                
+                // 如果没有传参数（从命令面板运行），取当前活动编辑器
+                if (!targetUri) {
+                    const activeEditor = vscode.window.activeTextEditor;
+                    if (!activeEditor) {
+                        vscode.window.showWarningMessage('请先打开一个支持的文件');
+                        return;
+                    }
+                    targetUri = activeEditor.document.uri;
+                }
+
+                if (targetUri.scheme !== 'file') {
+                    vscode.window.showErrorMessage('仅支持本地文件');
+                    return;
+                }
+
+                const filePath = targetUri.fsPath;
+                const ext = path.extname(filePath).toLowerCase();
+                const supportedExts = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'];
+                
+                if (!supportedExts.includes(ext)) {
+                    vscode.window.showErrorMessage(`不支持的文件类型: ${ext}`);
+                    return;
+                }
+
+                // 查找当前工作区根目录
+                const workspaceFolder = vscode.workspace.getWorkspaceFolder(targetUri);
+                const cwd = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(filePath);
+                
+                // 使用相对路径（统一正斜杠）
+                const relativePath = path.relative(cwd, filePath).replace(/\\/g, '/');
+                const terminalName = 'tsx';
+                
+                // 尝试复用同名终端
+                let terminal = vscode.window.terminals.find(t => t.name === terminalName);
+                if (!terminal) {
+                    terminal = vscode.window.createTerminal({
+                        name: terminalName,
+                        cwd: cwd
+                    });
+                }
+                
+                // 执行 npx tsx 命令 使用相对路径
+                terminal.sendText(`npx tsx "${relativePath}"`);
+                terminal.show();
+                
+                log('TSX', `启动终端运行: npx tsx "${relativePath}"`);
+                vscode.window.showInformationMessage(`✅ 已启动 tsx 运行: ${relativePath}`);
+
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error('Run tsx error:', error);
+                vscode.window.showErrorMessage(`❌ 运行失败: ${errorMessage}`);
+            }
+        }
+    );
+
+    context.subscriptions.push(runWithTsxDisposable);
 }
 
 export function deactivate() {
