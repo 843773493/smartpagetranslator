@@ -8,10 +8,12 @@ dist/
 # VS Code
 .vscode/
 .vscode-test/
+reference_repo/
 
 # Build artifacts
 build/
 *.vsix
+tsconfig.tsbuildinfo
 
 # Misc
 coverage/

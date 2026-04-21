@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -28,7 +28,8 @@
     "onStartupFinished",
     "onCommand:smartPageTranslator.translate",
     "onCommand:smartPageTranslator.extractAstOutline",
-    "onCommand:smartPageTranslator.runWithTsx"
+    "onCommand:smartPageTranslator.runWithTsx",
+    "onCommand:smartPageTranslator.runPytest"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -47,25 +48,51 @@
         "command": "smartPageTranslator.runWithTsx",
         "title": "用tsx运行",
         "category": "Smart Page Translator"
+      },
+      {
+        "command": "smartPageTranslator.runPytest",
+        "title": "pytest运行",
+        "category": "Smart Page Translator"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "smart.run",
+        "label": "Run"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "smartPageTranslator.runWithTsx",
-          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+          "submenu": "smart.run",
+          "group": "Python",
+          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
         }
       ],
       "editor/title/context": [
         {
-          "command": "smartPageTranslator.runWithTsx",
-          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+          "submenu": "smart.run",
+          "group": "Python",
+          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
         }
       ],
       "editor/context": [
         {
+          "submenu": "smart.run",
+          "group": "Python",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
+        }
+      ],
+      "smart.run": [
+        {
           "command": "smartPageTranslator.runWithTsx",
-          "when": "editorTextFocus && resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+          "group": "Python",
+          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs)$/"
+        },
+        {
+          "command": "smartPageTranslator.runPytest",
+          "group": "Python",
+          "when": "resourceLangId == python && !virtualWorkspace && shellExecutionSupported"
         }
       ],
       "editor/context/copy": [
