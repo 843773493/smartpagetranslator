@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as gl from 'glob';
 import * as path from 'path';
 import { Note } from './note';
 
@@ -69,7 +68,7 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 		}
 	}
 
-	getNotes(notesLocation: string, notesExtensions: string): Note[] {
+	getNotes(notesLocation: string, _notesExtensions: string): Note[] {
 		if (this.pathExists(notesLocation)) {
 			const result: Note[] = [];
 
@@ -101,19 +100,13 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 							command: 'smartPageTranslator.notes.openNote',
 							title: '',
 							arguments: [path.join(notesLocation, note)]
-						});
+						}
+					);
 				};
 
-				let notes;
-				if (notesExtensions === '*') {
-					notes = gl.sync('*', { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
-				} else {
-					notes = gl.sync(`*.{${notesExtensions}}`, { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
-					if (notes.length === 0) {
-						// 如果扩展名过滤没有匹配到任何文件，回退为显示当前目录下的所有文件，避免树视图只剩文件夹
-						notes = gl.sync('*', { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
-					}
-				}
+				const notes = items
+					.filter(item => item.isFile())
+					.map(item => listOfNotes(item.name));
 				result.push(...notes);
 
 			} catch (err) {
