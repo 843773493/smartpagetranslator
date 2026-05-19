@@ -4,6 +4,25 @@ import * as gl from 'glob';
 import * as path from 'path';
 import { Note } from './note';
 
+function expandHomePath(input: string): string {
+	if (!input) {
+		return input;
+	}
+
+	if (input === '~') {
+		return process.env.HOME || process.env.USERPROFILE || input;
+	}
+
+	if (input.startsWith('~/') || input.startsWith('~\\')) {
+		const home = process.env.HOME || process.env.USERPROFILE;
+		if (home) {
+			return path.join(home, input.slice(2));
+		}
+	}
+
+	return input;
+}
+
 export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 
 	private _onDidChangeTreeData: vscode.EventEmitter<Note | undefined> = new vscode.EventEmitter<Note | undefined>();
@@ -13,7 +32,13 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 	constructor(
 		private notesLocation: string,
 		private notesExtensions: string) {
+		this.notesLocation = expandHomePath(notesLocation);
 	};
+
+	public updateNotesLocation(notesLocation: string): void {
+		this.notesLocation = expandHomePath(notesLocation);
+		this.refresh();
+	}
 
 	public init(): NotesViewProvider {
 		this.refresh();
@@ -53,7 +78,6 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 
 				for (const item of items) {
 					if (item.isDirectory()) {
-						const folderPath = path.join(notesLocation, item.name);
 						const folderNote = new Note(
 							item.name,
 							notesLocation,
@@ -72,6 +96,7 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 						'',
 						'',
 						false,
+						vscode.TreeItemCollapsibleState.None,
 						{
 							command: 'smartPageTranslator.notes.openNote',
 							title: '',
@@ -86,8 +111,9 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 					notes = gl.sync(`*.{${notesExtensions}}`, { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
 				}
 				result.push(...notes);
+
 			} catch (err) {
-				console.error('Error reading directory:', err);
+				console.error('读取笔记目录失败:', err);
 			}
 
 			result.sort((a, b) => {

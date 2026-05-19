@@ -5,16 +5,38 @@ import { rimraf } from 'rimraf';
 import { Note } from './note';
 import { NotesViewProvider } from './notesViewProvider';
 
+function expandHomePath(input: string): string {
+	if (!input) {
+		return input;
+	}
+
+	if (input === '~') {
+		return process.env.HOME || process.env.USERPROFILE || input;
+	}
+
+	if (input.startsWith('~/') || input.startsWith('~\\')) {
+		const home = process.env.HOME || process.env.USERPROFILE;
+		if (home) {
+			return path.join(home, input.slice(2));
+		}
+	}
+
+	return input;
+}
+
 export function getNotesLocation(): string {
-	return String(vscode.workspace.getConfiguration('smartPageTranslator').get('notes.notesLocation'));
+	const result = String(vscode.workspace.getConfiguration('smartPageTranslator').get('notes.notesLocation'));
+	return expandHomePath(result);
 }
 
 export function getNotesDefaultNoteExtension(): string {
-	return String(vscode.workspace.getConfiguration('smartPageTranslator').get('notes.notesDefaultNoteExtension'));
+	const result = String(vscode.workspace.getConfiguration('smartPageTranslator').get('notes.notesDefaultNoteExtension'));
+	return result;
 }
 
 export function getNotesExtensions(): string {
-	return String(vscode.workspace.getConfiguration('smartPageTranslator').get('notes.notesExtensions'));
+	const result = String(vscode.workspace.getConfiguration('smartPageTranslator').get('notes.notesExtensions'));
+	return result;
 }
 
 export function deleteNote(note: Note, tree: NotesViewProvider): void {
@@ -56,8 +78,7 @@ export function deleteFolder(folder: Note, tree: NotesViewProvider): void {
 }
 
 export function listNotes(): void {
-	let notesLocation = String(getNotesLocation());
-	let notesExtensions = String(getNotesExtensions());
+	const notesLocation = String(getNotesLocation());
 	fs.readdir(String(notesLocation), (err, files) => {
 		if (err) {
 			console.error(err);
@@ -142,7 +163,9 @@ export function newFolder(tree: NotesViewProvider, parentFolder?: Note): void {
 }
 
 export function openNote(note: Note | string): void {
+	console.log('[DBG notesCommands] openNote() called', typeof note === 'string' ? `withpath="${note}"` : `note="${note.name}", isFolder=${note.isFolder}, fullPath="${note.fullPath}"`);
 	if (typeof note !== 'string' && note.isFolder) {
+		console.warn('[DBG notesCommands] openNote() – note is a folder, returning early');
 		return;
 	}
 
@@ -150,11 +173,11 @@ export function openNote(note: Note | string): void {
 
 	if (typeof note === 'string') {
 		filePath = note;
-	}
-	else {
+	} else {
 		filePath = path.join(String(note.location), String(note.name));
 	}
 
+	console.log(`[DBG notesCommands] openNote() – opening document at: "${filePath}"`);
 	vscode.window.showTextDocument(vscode.Uri.file(filePath));
 }
 
@@ -230,7 +253,7 @@ export function renameFolder(folder: Note, tree: NotesViewProvider): void {
 export function setupNotes(tree?: NotesViewProvider): void {
 	const notesLocation = getNotesLocation();
 	if (notesLocation) {
-		vscode.commands.executeCommand('workbench.action.openSettings', `@ext:smart-page-translator`);
+		vscode.commands.executeCommand('workbench.action.openSettings', `@ext:smart-page-translator.notes`);
 		return;
 	}
 

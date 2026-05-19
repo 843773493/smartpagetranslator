@@ -11,13 +11,10 @@ export class Note extends vscode.TreeItem {
 		public readonly category: string,
 		public readonly tags: string,
 		public readonly isDirectory: boolean = false,
+		collapsibleState: vscode.TreeItemCollapsibleState = isDirectory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
 		public readonly command?: vscode.Command
 	) {
-		super(name, isDirectory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
-		this.name = name;
-		this.location = location;
-		this.category = category;
-		this.tags = tags;
+		super(name, collapsibleState);
 		this.isFolder = isDirectory;
 		this.fullPath = path.join(location, name);
 

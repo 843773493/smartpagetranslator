@@ -24,7 +24,7 @@
   "categories": [
     "Other"
   ],
-    "activationEvents": [
+  "activationEvents": [
     "onStartupFinished",
     "onView:smart-page-translator-notes",
     "onCommand:smartPageTranslator.translate",
@@ -58,12 +58,18 @@
       {
         "command": "smartPageTranslator.notes.deleteNote",
         "title": "删除笔记",
-        "category": "笔记"
+        "icon": {
+          "light": "asset/resources/light/delete.svg",
+          "dark": "asset/resources/dark/delete.svg"
+        }
       },
       {
         "command": "smartPageTranslator.notes.deleteFolder",
         "title": "删除文件夹",
-        "category": "笔记"
+        "icon": {
+          "light": "asset/resources/light/delete.svg",
+          "dark": "asset/resources/dark/delete.svg"
+        }
       },
       {
         "command": "smartPageTranslator.notes.listNotes",
@@ -73,37 +79,50 @@
       {
         "command": "smartPageTranslator.notes.newNote",
         "title": "新建笔记",
-        "category": "笔记"
+        "category": "笔记",
+        "icon": "$(new-file)"
       },
       {
         "command": "smartPageTranslator.notes.newFolder",
         "title": "新建文件夹",
-        "category": "笔记"
+        "category": "笔记",
+        "icon": "$(new-folder)"
       },
       {
         "command": "smartPageTranslator.notes.openNote",
         "title": "打开笔记",
-        "category": "笔记"
+        "icon": {
+          "light": "asset/resources/light/note.svg",
+          "dark": "asset/resources/dark/note.svg"
+        }
       },
       {
         "command": "smartPageTranslator.notes.refreshNotes",
         "title": "刷新笔记",
-        "category": "笔记"
+        "category": "笔记",
+        "icon": "$(refresh)"
       },
       {
         "command": "smartPageTranslator.notes.renameNote",
         "title": "重命名笔记",
-        "category": "笔记"
+        "icon": {
+          "light": "asset/resources/light/rename.svg",
+          "dark": "asset/resources/dark/rename.svg"
+        }
       },
       {
         "command": "smartPageTranslator.notes.renameFolder",
         "title": "重命名文件夹",
-        "category": "笔记"
+        "icon": {
+          "light": "asset/resources/light/rename.svg",
+          "dark": "asset/resources/dark/rename.svg"
+        }
       },
       {
         "command": "smartPageTranslator.notes.setupNotes",
         "title": "设置笔记位置",
-        "category": "笔记"
+        "category": "笔记",
+        "icon": "$(gear)"
       }
     ],
     "submenus": [
@@ -117,10 +136,7 @@
         {
           "id": "smart-page-translator-notes",
           "title": "Notes",
-          "icon": {
-            "light": "asset/resources/notes-light.svg",
-            "dark": "asset/resources/notes-dark.svg"
-          }
+          "icon": "asset/resources/notes-light.svg"
         }
       ]
     },
@@ -207,43 +223,85 @@
           "command": "smartPageTranslator.notes.refreshNotes",
           "when": "view == notes",
           "group": "navigation@3"
+        },
+        {
+          "command": "smartPageTranslator.notes.setupNotes",
+          "when": "view == notes",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
         {
-          "command": "smartPageTranslator.notes.openNote",
-          "when": "view == notes && viewItem == note",
-          "group": "notes@1"
-        },
-        {
           "command": "smartPageTranslator.notes.renameNote",
           "when": "view == notes && viewItem == note",
-          "group": "notes@2"
+          "group": "1_modification@1"
         },
         {
           "command": "smartPageTranslator.notes.deleteNote",
           "when": "view == notes && viewItem == note",
-          "group": "notes@3"
+          "group": "1_modification@2"
         },
         {
           "command": "smartPageTranslator.notes.openNote",
-          "when": "view == notes && viewItem == folder",
-          "group": "notes@1"
-        },
-        {
-          "command": "smartPageTranslator.notes.newNote",
-          "when": "view == notes && viewItem == folder",
-          "group": "notes@2"
+          "when": "view == notes && viewItem == note",
+          "group": "2_workspace@1"
         },
         {
           "command": "smartPageTranslator.notes.renameFolder",
           "when": "view == notes && viewItem == folder",
-          "group": "notes@3"
+          "group": "1_modification@1"
         },
         {
           "command": "smartPageTranslator.notes.deleteFolder",
           "when": "view == notes && viewItem == folder",
-          "group": "notes@4"
+          "group": "1_modification@2"
+        },
+        {
+          "command": "smartPageTranslator.notes.openNote",
+          "when": "view == notes && viewItem == folder",
+          "group": "2_workspace@1"
+        },
+        {
+          "command": "smartPageTranslator.notes.newNote",
+          "when": "view == notes && viewItem == folder",
+          "group": "2_workspace@2"
+        },
+        {
+          "command": "smartPageTranslator.notes.newNote",
+          "when": "view == notes && !viewItem",
+          "group": "navigation@1"
+        },
+        {
+          "command": "smartPageTranslator.notes.newFolder",
+          "when": "view == notes && !viewItem",
+          "group": "navigation@2"
+        },
+        {
+          "command": "smartPageTranslator.notes.refreshNotes",
+          "when": "view == notes && !viewItem",
+          "group": "navigation@3"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "smartPageTranslator.notes.newNote",
+          "group": "notes@1",
+          "when": "view == notes"
+        },
+        {
+          "command": "smartPageTranslator.notes.newFolder",
+          "group": "notes@2",
+          "when": "view == notes"
+        },
+        {
+          "command": "smartPageTranslator.notes.refreshNotes",
+          "group": "notes@3",
+          "when": "view == notes"
+        },
+        {
+          "command": "smartPageTranslator.notes.setupNotes",
+          "group": "notes@4",
+          "when": "view == notes"
         }
       ],
       "editor/title": [
@@ -287,7 +345,25 @@
           "description": "新建笔记的默认扩展名"
         }
       }
-    }
+    },
+    "keybindings": [
+      {
+        "command": "smartPageTranslator.notes.listNotes",
+        "key": "alt+l",
+        "mac": "alt+l"
+      },
+      {
+        "command": "smartPageTranslator.notes.newNote",
+        "key": "alt+n",
+        "mac": "alt+n"
+      }
+    ],
+    "viewsWelcome": [
+      {
+        "view": "notes",
+        "contents": "To get started, you need to select a location to store your notes.\n[Select Location](command:smartPageTranslator.notes.setupNotes)"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
