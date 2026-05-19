@@ -26,6 +26,7 @@
   ],
     "activationEvents": [
     "onStartupFinished",
+    "onView:smart-page-translator-notes",
     "onCommand:smartPageTranslator.translate",
     "onCommand:smartPageTranslator.extractAstOutline",
     "onCommand:smartPageTranslator.runWithTsx",
@@ -53,6 +54,56 @@
         "command": "smartPageTranslator.runPytest",
         "title": "pytest运行",
         "category": "Smart Page Translator"
+      },
+      {
+        "command": "smartPageTranslator.notes.deleteNote",
+        "title": "删除笔记",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.deleteFolder",
+        "title": "删除文件夹",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.listNotes",
+        "title": "列出笔记",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.newNote",
+        "title": "新建笔记",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.newFolder",
+        "title": "新建文件夹",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.openNote",
+        "title": "打开笔记",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.refreshNotes",
+        "title": "刷新笔记",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.renameNote",
+        "title": "重命名笔记",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.renameFolder",
+        "title": "重命名文件夹",
+        "category": "笔记"
+      },
+      {
+        "command": "smartPageTranslator.notes.setupNotes",
+        "title": "设置笔记位置",
+        "category": "笔记"
       }
     ],
     "submenus": [
@@ -61,14 +112,27 @@
         "label": "Run"
       }
     ],
-    "menus": {
-      "explorer/context": [
+    "viewsContainers": {
+      "activitybar": [
         {
-          "submenu": "smart.run",
-          "group": "Python",
-          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
+          "id": "smart-page-translator-notes",
+          "title": "Notes",
+          "icon": {
+            "light": "asset/resources/notes-light.svg",
+            "dark": "asset/resources/notes-dark.svg"
+          }
         }
-      ],
+      ]
+    },
+    "views": {
+      "smart-page-translator-notes": [
+        {
+          "id": "notes",
+          "name": "Notes"
+        }
+      ]
+    },
+    "menus": {
       "editor/title/context": [
         {
           "submenu": "smart.run",
@@ -101,6 +165,87 @@
           "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|mjs|cjs|ts|tsx|py)$/"
         }
       ],
+      "explorer/context": [
+        {
+          "submenu": "smart.run",
+          "group": "Python",
+          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
+        },
+        {
+          "command": "smartPageTranslator.notes.newNote",
+          "group": "notes@1",
+          "when": "view == notes"
+        },
+        {
+          "command": "smartPageTranslator.notes.newFolder",
+          "group": "notes@2",
+          "when": "view == notes"
+        },
+        {
+          "command": "smartPageTranslator.notes.refreshNotes",
+          "group": "notes@3",
+          "when": "view == notes"
+        },
+        {
+          "command": "smartPageTranslator.notes.setupNotes",
+          "group": "notes@4",
+          "when": "view == notes"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "smartPageTranslator.notes.newNote",
+          "when": "view == notes",
+          "group": "navigation@1"
+        },
+        {
+          "command": "smartPageTranslator.notes.newFolder",
+          "when": "view == notes",
+          "group": "navigation@2"
+        },
+        {
+          "command": "smartPageTranslator.notes.refreshNotes",
+          "when": "view == notes",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "smartPageTranslator.notes.openNote",
+          "when": "view == notes && viewItem == note",
+          "group": "notes@1"
+        },
+        {
+          "command": "smartPageTranslator.notes.renameNote",
+          "when": "view == notes && viewItem == note",
+          "group": "notes@2"
+        },
+        {
+          "command": "smartPageTranslator.notes.deleteNote",
+          "when": "view == notes && viewItem == note",
+          "group": "notes@3"
+        },
+        {
+          "command": "smartPageTranslator.notes.openNote",
+          "when": "view == notes && viewItem == folder",
+          "group": "notes@1"
+        },
+        {
+          "command": "smartPageTranslator.notes.newNote",
+          "when": "view == notes && viewItem == folder",
+          "group": "notes@2"
+        },
+        {
+          "command": "smartPageTranslator.notes.renameFolder",
+          "when": "view == notes && viewItem == folder",
+          "group": "notes@3"
+        },
+        {
+          "command": "smartPageTranslator.notes.deleteFolder",
+          "when": "view == notes && viewItem == folder",
+          "group": "notes@4"
+        }
+      ],
       "editor/title": [
         {
           "command": "smartPageTranslator.translate",
@@ -125,6 +270,21 @@
           "minimum": 100,
           "maximum": 10000,
           "description": "Maximum chunk length (in characters) when splitting text for translation. Default is 1000."
+        },
+        "smartPageTranslator.notes.notesLocation": {
+          "type": "string",
+          "default": "",
+          "description": "笔记存储位置路径"
+        },
+        "smartPageTranslator.notes.notesExtensions": {
+          "type": "string",
+          "default": "md",
+          "description": "笔记文件扩展名，多个用逗号分隔"
+        },
+        "smartPageTranslator.notes.notesDefaultNoteExtension": {
+          "type": "string",
+          "default": "md",
+          "description": "新建笔记的默认扩展名"
         }
       }
     }
@@ -151,9 +311,15 @@
   "dependencies": {
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0",
-    "bing-translate-api": "^3.0.1"
+    "bing-translate-api": "^3.0.1",
+    "glob": "^11.0.0",
+    "rimraf": "^6.0.0"
   },
   "files": [
-    "scripts/**/*"
+    "out/**/*",
+    "asset/**/*",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ]
 }

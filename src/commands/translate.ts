@@ -1,11 +1,11 @@
 import { translate } from 'bing-translate-api';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { log } from '../utils/logger';
 
 export function registerTranslateCommand(
     context: vscode.ExtensionContext,
     output: vscode.OutputChannel,
+    logFn: (label: string, message: string) => void,
 ) {
     const disposable = vscode.commands.registerCommand(
         'smartPageTranslator.translate',
@@ -22,7 +22,7 @@ export function registerTranslateCommand(
                         if (tabUri && tabUri.scheme === 'file') {
                             try {
                                 document = await vscode.workspace.openTextDocument(tabUri);
-                                log(output, path.basename(tabUri.fsPath), `Using file from active tab: ${tabUri.fsPath}`);
+                                logFn(path.basename(tabUri.fsPath), `Using file from active tab: ${tabUri.fsPath}`);
                             } catch (e) {
                                 // ignore and fall back
                             }
@@ -61,10 +61,10 @@ export function registerTranslateCommand(
                         output.clear();
                         output.show(true);
                         const docLabel = path.basename(document!.fileName);
-                        log(output, docLabel, `Translating document: ${document!.fileName}`);
+                        logFn(docLabel, `Translating document: ${document!.fileName}`);
 
                         token.onCancellationRequested(() => {
-                            log(output, docLabel, 'Cancellation requested by user');
+                            logFn(docLabel, 'Cancellation requested by user');
                         });
 
                         try {
@@ -73,7 +73,7 @@ export function registerTranslateCommand(
                             const settings = vscode.workspace.getConfiguration('smartPageTranslator');
                             const userMaxChunk = settings.get<number>('maxChunk', 1000);
                             const MAX_CHUNK = Math.max(100, Math.min(10000, Math.floor(Number(userMaxChunk) || 1000)));
-                            log(output, docLabel, `Using max chunk size: ${MAX_CHUNK}`);
+                            logFn(docLabel, `Using max chunk size: ${MAX_CHUNK}`);
 
                             function chunkText(t: string, maxLen = MAX_CHUNK): string[] {
                                 const tokens = t.split(/(\s+)/);
@@ -100,13 +100,13 @@ export function registerTranslateCommand(
                             }
 
                             const chunks = chunkText(text, MAX_CHUNK);
-                            log(output, docLabel, `Total chunks: ${chunks.length}`);
+                            logFn(docLabel, `Total chunks: ${chunks.length}`);
 
                             async function translateChunks(chunks: string[], concurrency = 4): Promise<string> {
                                 const results: string[] = new Array(chunks.length);
                                 for (let i = 0; i < chunks.length; i += concurrency) {
                                     if (token.isCancellationRequested) {
-                                        log(output, docLabel, 'Aborting before starting next batch due to cancellation');
+                                        logFn(docLabel, 'Aborting before starting next batch due to cancellation');
                                         throw new Error('Cancelled');
                                     }
 
@@ -115,11 +115,11 @@ export function registerTranslateCommand(
                                         return translate(chunk, null, 'zh-Hans')
                                             .then(res => {
                                                 results[index] = res.translation ?? '';
-                                                log(output, docLabel, `Chunk ${index + 1}/${chunks.length} translated (len=${results[index].length})`);
+                                                logFn(docLabel, `Chunk ${index + 1}/${chunks.length} translated (len=${results[index].length})`);
                                                 progress.report({ message: `Translating chunk ${index + 1}/${chunks.length}` });
                                             })
                                             .catch(err => {
-                                                log(output, docLabel, `Error translating chunk ${index + 1}: ${String(err)}`);
+                                                logFn(docLabel, `Error translating chunk ${index + 1}: ${String(err)}`);
                                                 results[index] = '';
                                             });
                                     });
@@ -131,18 +131,18 @@ export function registerTranslateCommand(
 
                             const userConcurrency = settings.get<number>('concurrency', 20);
                             const concurrency = Math.max(1, Math.min(100, Math.floor(userConcurrency)));
-                            log(output, docLabel, `Using concurrency: ${concurrency}`);
+                            logFn(docLabel, `Using concurrency: ${concurrency}`);
 
                             let translatedText: string;
                             try {
                                 translatedText = await translateChunks(chunks, concurrency);
                             } catch (err) {
                                 if (String(err).includes('Cancelled')) {
-                                    log(output, docLabel, 'Translation cancelled by user');
+                                    logFn(docLabel, 'Translation cancelled by user');
                                     vscode.window.showInformationMessage('Translation cancelled');
                                     return;
                                 }
-                                log(output, docLabel, `Fatal error translating chunks: ${String(err)}`);
+                                logFn(docLabel, `Fatal error translating chunks: ${String(err)}`);
                                 throw err;
                             }
 
@@ -162,7 +162,7 @@ export function registerTranslateCommand(
                                     edit.insert(new vscode.Position(0, 0), translatedText);
                                 });
 
-                                log(output, docLabel, `Translation complete, opened in unsaved editor: ${suggestedPath}`);
+                                logFn(docLabel, `Translation complete, opened in unsaved editor: ${suggestedPath}`);
                                 vscode.window.showInformationMessage(
                                     `✅ Translation complete! Opened: ${path.basename(suggestedPath)} (unsaved)`
                                 );
@@ -170,7 +170,7 @@ export function registerTranslateCommand(
                                 const newDoc = await vscode.workspace.openTextDocument({ content: translatedText, language: document!.languageId });
                                 await vscode.window.showTextDocument(newDoc);
 
-                                log(output, docLabel, 'Translation complete, opened in new untitled editor (unsaved)');
+                                logFn(docLabel, 'Translation complete, opened in new untitled editor (unsaved)');
                                 vscode.window.showInformationMessage('✅ Translation complete! Opened translated content in a new unsaved editor');
                             }
                         } catch (error) {

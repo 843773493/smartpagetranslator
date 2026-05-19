@@ -2,11 +2,10 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import * as vscode from 'vscode';
-import { log } from '../utils/logger';
 
 export function registerAstOutlineCommand(
     context: vscode.ExtensionContext,
-    output: vscode.OutputChannel,
+    logFn: (label: string, message: string) => void,
 ) {
     const disposable = vscode.commands.registerCommand(
         'smartPageTranslator.extractAstOutline',
@@ -28,7 +27,7 @@ export function registerAstOutlineCommand(
                     return;
                 }
 
-                log(output, 'AST', `Extracting outline from: ${filePath}`);
+                logFn('AST', `Extracting outline from: ${filePath}`);
 
                 const scriptPath = path.join(context.extensionPath, 'scripts', 'extract-ast.mjs');
                 if (!fs.existsSync(scriptPath)) {
@@ -50,7 +49,7 @@ export function registerAstOutlineCommand(
                 const outline = result.stdout;
                 await vscode.env.clipboard.writeText(outline);
                 vscode.window.showInformationMessage('AST outline copied to clipboard!');
-                log(output, 'AST', 'Outline copied to clipboard');
+                logFn('AST', 'Outline copied to clipboard');
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 vscode.window.showErrorMessage(`❌ Error: ${errorMessage}`);
