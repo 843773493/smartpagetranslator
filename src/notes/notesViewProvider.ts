@@ -109,6 +109,10 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 					notes = gl.sync('*', { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
 				} else {
 					notes = gl.sync(`*.{${notesExtensions}}`, { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
+					if (notes.length === 0) {
+						// 如果扩展名过滤没有匹配到任何文件，回退为显示当前目录下的所有文件，避免树视图只剩文件夹
+						notes = gl.sync('*', { cwd: notesLocation, nodir: true, nocase: true }).map(listOfNotes);
+					}
 				}
 				result.push(...notes);
 
