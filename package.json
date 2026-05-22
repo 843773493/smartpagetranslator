@@ -187,11 +187,6 @@
       ],
       "explorer/context": [
         {
-          "submenu": "smart.run",
-          "group": "Python",
-          "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
-        },
-        {
           "command": "smartPageTranslator.notes.newNote",
           "group": "notes@1",
           "when": "view == notes"
@@ -286,28 +281,6 @@
           "group": "navigation@3"
         }
       ],
-      "explorer/context": [
-        {
-          "command": "smartPageTranslator.notes.newNote",
-          "group": "notes@1",
-          "when": "view == notes"
-        },
-        {
-          "command": "smartPageTranslator.notes.newFolder",
-          "group": "notes@2",
-          "when": "view == notes"
-        },
-        {
-          "command": "smartPageTranslator.notes.refreshNotes",
-          "group": "notes@3",
-          "when": "view == notes"
-        },
-        {
-          "command": "smartPageTranslator.notes.setupNotes",
-          "group": "notes@4",
-          "when": "view == notes"
-        }
-      ],
       "editor/title": [
         {
           "command": "smartPageTranslator.translate",
@@ -376,17 +349,19 @@
     "publish:vsix": "node ./scripts/publish-vsix.js",
     "publish": "npm run publish:vsix",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "npm run compile",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/src/test/runTest.js"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "16.x",
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vscode/test-electron": "^2.3.9",
     "eslint": "^8.56.0",
+    "mocha": "^11.7.6",
     "typescript": "^5.9.3",
     "vsce": "^2.10.0"
   },

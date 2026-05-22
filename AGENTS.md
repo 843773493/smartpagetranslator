@@ -48,6 +48,7 @@
 1. 全局配置只使用 config.jsonc / config.example.jsonc
 2. 代码运行时应该在日志目录维护一个监控用的config_obs.jsonc（复制于config.jsonc），每当对应的配置参数被代码调用时，则在config_obs.jsonc对应行添加注释表示已被运行时使用，专门写个类来封装这些功能
 3. 本项目python环境完全由uv管理
+4. 设置页查询优先直接使用与 package.json 中配置项一致的 `smartPageTranslator.notes` 命名空间
 
 ### 项目范围
 

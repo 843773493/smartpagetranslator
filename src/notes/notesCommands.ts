@@ -1,7 +1,7 @@
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { rimraf } from 'rimraf';
+import * as vscode from 'vscode';
 import { Note } from './note';
 import { NotesViewProvider } from './notesViewProvider';
 
@@ -253,7 +253,7 @@ export function renameFolder(folder: Note, tree: NotesViewProvider): void {
 export function setupNotes(tree?: NotesViewProvider): void {
 	const notesLocation = getNotesLocation();
 	if (notesLocation) {
-		vscode.commands.executeCommand('workbench.action.openSettings', `@ext:smart-page-translator.notes`);
+		vscode.commands.executeCommand('workbench.action.openSettings', `smartPageTranslator.notes`);
 		return;
 	}
 

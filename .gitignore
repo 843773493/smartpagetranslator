@@ -4,6 +4,7 @@ node_modules/
 # Output
 out/
 dist/
+temp/
 
 # VS Code
 .vscode/
