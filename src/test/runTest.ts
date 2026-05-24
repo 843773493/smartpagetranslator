@@ -3,7 +3,7 @@ import * as path from 'path';
 
 async function main(): Promise<void> {
     const extensionDevelopmentPath = path.resolve(__dirname, '../../..');
-    const extensionTestsPath = path.resolve(__dirname, './suite');
+    const extensionTestsPath = path.resolve(__dirname, './suite/runTestSuite');
 
     await runTests({
         extensionDevelopmentPath,

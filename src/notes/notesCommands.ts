@@ -64,12 +64,12 @@ export function deleteFolder(folder: Note, tree: NotesViewProvider): void {
 		if (result === '是') {
 			const folderPath = path.join(folder.location, folder.name);
 
-			rimraf(folderPath).then((deleted) => {
+			rimraf(folderPath).then((deleted: unknown) => {
 				if (deleted) {
 					vscode.window.showInformationMessage(`成功删除文件夹 ${folder.name}。`);
 					tree.refresh();
 				}
-			}).catch((err) => {
+					}).catch((err: unknown) => {
 				console.error(err);
 				vscode.window.showErrorMessage(`删除文件夹 ${folder.name} 失败。`);
 			});

@@ -1,6 +1,6 @@
 import * as assert from 'assert';
-import { suite, test } from 'mocha';
 import * as vscode from 'vscode';
+import 'mocha';
 
 suite('Extension Test Suite', () => {
     test('should register the main commands', async () => {
