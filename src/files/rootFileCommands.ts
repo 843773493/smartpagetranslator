@@ -4,15 +4,24 @@ import { RootFileTreeProvider } from './rootFileTreeProvider';
 import { basenameOfUri, displayPathOfUri, localRootUriOf, parentUriOf } from './rootFileUri';
 
 type FileCommandTarget = RootFileItem | vscode.Uri | string | undefined;
+type ClipboardMode = 'copy' | 'cut';
+type RootFileClipboard = {
+	readonly uri: vscode.Uri;
+	readonly mode: ClipboardMode;
+};
 
 const DELETE_TO_TRASH = '移到回收站';
 const DELETE_PERMANENTLY = '永久删除';
+const OVERWRITE = '覆盖';
+const RENAME = '重命名';
 
 export function registerRootFileCommands(
 	context: vscode.ExtensionContext,
 	tree: RootFileTreeProvider,
 	treeView: vscode.TreeView<RootFileItem>
 ): void {
+	let clipboard: RootFileClipboard | undefined;
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.refresh', (target?: FileCommandTarget) => {
 			const uri = getUri(target);
@@ -22,7 +31,7 @@ export function registerRootFileCommands(
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.open', async (target?: FileCommandTarget) => {
-			await openFile(target);
+			await openFile(target || selectedTreeItem(treeView));
 		})
 	);
 
@@ -48,7 +57,7 @@ export function registerRootFileCommands(
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.rename', async (target?: FileCommandTarget) => {
-			const renamed = await renameEntry(target);
+			const renamed = await renameEntry(target || selectedTreeItem(treeView));
 			if (renamed) {
 				tree.refresh(tree.parentUri(renamed.oldUri));
 				tree.refresh(tree.parentUri(renamed.newUri));
@@ -59,7 +68,7 @@ export function registerRootFileCommands(
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.delete', async (target?: FileCommandTarget) => {
-			const deleted = await deleteEntry(target);
+			const deleted = await deleteEntry(target || selectedTreeItem(treeView));
 			if (deleted) {
 				tree.refresh(tree.parentUri(deleted));
 			}
@@ -67,8 +76,38 @@ export function registerRootFileCommands(
 	);
 
 	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.copy', async (target?: FileCommandTarget) => {
+			const uri = requireUri(target || selectedTreeItem(treeView));
+			clipboard = { uri, mode: 'copy' };
+			void vscode.window.showInformationMessage(`已复制：${displayPathOfUri(uri)}`);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.cut', async (target?: FileCommandTarget) => {
+			const uri = requireUri(target || selectedTreeItem(treeView));
+			clipboard = { uri, mode: 'cut' };
+			void vscode.window.showInformationMessage(`已剪切：${displayPathOfUri(uri)}`);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.paste', async (target?: FileCommandTarget) => {
+			const pasted = await pasteEntry(clipboard, target || selectedTreeItem(treeView));
+			if (pasted) {
+				tree.refresh(tree.parentUri(pasted.target));
+				if (pasted.mode === 'cut') {
+					tree.refresh(tree.parentUri(pasted.source));
+					clipboard = undefined;
+				}
+				await revealIfVisible(treeView, pasted.target);
+			}
+		})
+	);
+
+	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.copyPath', async (target?: FileCommandTarget) => {
-			const uri = requireUri(target);
+			const uri = requireUri(target || selectedTreeItem(treeView));
 			await vscode.env.clipboard.writeText(uri.fsPath);
 			void vscode.window.showInformationMessage(`已复制路径：${displayPathOfUri(uri)}`);
 		})
@@ -76,7 +115,7 @@ export function registerRootFileCommands(
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.revealInOS', async (target?: FileCommandTarget) => {
-			const uri = requireUri(target);
+			const uri = requireUri(target || selectedTreeItem(treeView));
 			await revealInOS(uri);
 		})
 	);
@@ -189,6 +228,127 @@ async function deleteEntry(target?: FileCommandTarget): Promise<vscode.Uri | und
 	}
 }
 
+async function pasteEntry(
+	clipboard: RootFileClipboard | undefined,
+	target?: FileCommandTarget
+): Promise<{ source: vscode.Uri; target: vscode.Uri; mode: ClipboardMode } | undefined> {
+	if (!clipboard) {
+		void vscode.window.showWarningMessage('没有可粘贴的文件或文件夹。');
+		return undefined;
+	}
+
+	const destinationDirectory = await resolveDirectory(target);
+	const source = clipboard.uri;
+	const sourceStat = await vscode.workspace.fs.stat(source);
+	if (isDirectory(sourceStat) && isSameOrChildUri(source, destinationDirectory)) {
+		void vscode.window.showWarningMessage('不能把文件夹粘贴到自身或其子目录。');
+		return undefined;
+	}
+
+	const pastedName = basenameOfUri(source);
+	let targetUri = vscode.Uri.joinPath(destinationDirectory, pastedName);
+	let overwrite = false;
+
+	if (await pathExists(targetUri)) {
+		const selected = await vscode.window.showWarningMessage(
+			`'${pastedName}' 已存在。`,
+			{ modal: true },
+			OVERWRITE,
+			RENAME
+		);
+
+		if (selected === OVERWRITE) {
+			if (isSameUri(source, targetUri)) {
+				void vscode.window.showWarningMessage('源路径和目标路径相同，不能覆盖自身。');
+				return undefined;
+			}
+			overwrite = true;
+		} else if (selected === RENAME) {
+			const newName = await askEntryName('粘贴为？', pastedName, destinationDirectory);
+			if (!newName) {
+				return undefined;
+			}
+			targetUri = vscode.Uri.joinPath(destinationDirectory, newName);
+			if (await pathExists(targetUri)) {
+				void vscode.window.showWarningMessage(`'${newName}' 已存在。`);
+				return undefined;
+			}
+		} else {
+			return undefined;
+		}
+	}
+
+	try {
+		if (clipboard.mode === 'copy') {
+			await copyEntry(source, targetUri, sourceStat, overwrite);
+		} else {
+			await moveEntry(source, targetUri, sourceStat, overwrite);
+		}
+		return { source, target: targetUri, mode: clipboard.mode };
+	} catch (err) {
+		await showFileOperationError(clipboard.mode === 'copy' ? '复制粘贴失败' : '剪切粘贴失败', err);
+		return undefined;
+	}
+}
+
+async function copyEntry(
+	source: vscode.Uri,
+	target: vscode.Uri,
+	sourceStat: vscode.FileStat,
+	overwrite: boolean
+): Promise<void> {
+	if (isSameFileSystem(source, target)) {
+		await vscode.workspace.fs.copy(source, target, { overwrite });
+		return;
+	}
+
+	await copyEntryAcrossFileSystems(source, target, sourceStat, overwrite);
+}
+
+async function moveEntry(
+	source: vscode.Uri,
+	target: vscode.Uri,
+	sourceStat: vscode.FileStat,
+	overwrite: boolean
+): Promise<void> {
+	if (isSameFileSystem(source, target)) {
+		await vscode.workspace.fs.rename(source, target, { overwrite });
+		return;
+	}
+
+	await copyEntryAcrossFileSystems(source, target, sourceStat, overwrite);
+	await vscode.workspace.fs.delete(source, { recursive: true, useTrash: false });
+}
+
+async function copyEntryAcrossFileSystems(
+	source: vscode.Uri,
+	target: vscode.Uri,
+	sourceStat: vscode.FileStat,
+	overwrite: boolean
+): Promise<void> {
+	if (await pathExists(target)) {
+		if (!overwrite) {
+			throw vscode.FileSystemError.FileExists(target);
+		}
+		await vscode.workspace.fs.delete(target, { recursive: true, useTrash: false });
+	}
+
+	if (isDirectory(sourceStat)) {
+		await vscode.workspace.fs.createDirectory(target);
+		const children = await vscode.workspace.fs.readDirectory(source);
+		for (const [name] of children) {
+			const childSource = vscode.Uri.joinPath(source, name);
+			const childTarget = vscode.Uri.joinPath(target, name);
+			const childStat = await vscode.workspace.fs.stat(childSource);
+			await copyEntryAcrossFileSystems(childSource, childTarget, childStat, false);
+		}
+		return;
+	}
+
+	const content = await vscode.workspace.fs.readFile(source);
+	await vscode.workspace.fs.writeFile(target, content);
+}
+
 async function resolveDirectory(target?: FileCommandTarget): Promise<vscode.Uri> {
 	const uri = getUri(target);
 	if (!uri) {
@@ -273,6 +433,37 @@ function requireUri(target?: FileCommandTarget): vscode.Uri {
 		throw new Error('文件命令缺少目标路径。');
 	}
 	return uri;
+}
+
+function selectedTreeItem(treeView: vscode.TreeView<RootFileItem>): RootFileItem | undefined {
+	return treeView.selection[0];
+}
+
+function isDirectory(stat: vscode.FileStat): boolean {
+	return (stat.type & vscode.FileType.Directory) === vscode.FileType.Directory;
+}
+
+function isSameFileSystem(left: vscode.Uri, right: vscode.Uri): boolean {
+	return left.scheme === right.scheme && left.authority === right.authority;
+}
+
+function isSameUri(left: vscode.Uri, right: vscode.Uri): boolean {
+	return left.toString() === right.toString();
+}
+
+function isSameOrChildUri(parent: vscode.Uri, child: vscode.Uri): boolean {
+	if (!isSameFileSystem(parent, child)) {
+		return false;
+	}
+
+	const parentPath = normalizeUriPath(parent.path);
+	const childPath = normalizeUriPath(child.path);
+	return childPath === parentPath || childPath.startsWith(`${parentPath}/`);
+}
+
+function normalizeUriPath(value: string): string {
+	const normalized = value.replace(/\/+$/g, '');
+	return normalized || '/';
 }
 
 async function revealIfVisible(treeView: vscode.TreeView<RootFileItem>, uri: vscode.Uri): Promise<void> {

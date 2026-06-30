@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -42,6 +42,9 @@
     "onCommand:smartPageTranslator.rootFiles.newFolder",
     "onCommand:smartPageTranslator.rootFiles.rename",
     "onCommand:smartPageTranslator.rootFiles.delete",
+    "onCommand:smartPageTranslator.rootFiles.copy",
+    "onCommand:smartPageTranslator.rootFiles.cut",
+    "onCommand:smartPageTranslator.rootFiles.paste",
     "onCommand:smartPageTranslator.rootFiles.copyPath",
     "onCommand:smartPageTranslator.rootFiles.revealInOS"
   ],
@@ -103,6 +106,24 @@
         "title": "删除",
         "category": "根目录文件树",
         "icon": "$(trash)"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.copy",
+        "title": "复制",
+        "category": "根目录文件树",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.cut",
+        "title": "剪切",
+        "category": "根目录文件树",
+        "icon": "$(cut)"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.paste",
+        "title": "粘贴",
+        "category": "根目录文件树",
+        "icon": "$(clippy)"
       },
       {
         "command": "smartPageTranslator.rootFiles.copyPath",
@@ -324,19 +345,34 @@
           "group": "2_modification@2"
         },
         {
+          "command": "smartPageTranslator.rootFiles.copy",
+          "when": "view == smart-page-translator-root-files && (viewItem == rootFilesFile || viewItem == rootFilesFolder)",
+          "group": "3_clipboard@1"
+        },
+        {
+          "command": "smartPageTranslator.rootFiles.cut",
+          "when": "view == smart-page-translator-root-files && (viewItem == rootFilesFile || viewItem == rootFilesFolder)",
+          "group": "3_clipboard@2"
+        },
+        {
+          "command": "smartPageTranslator.rootFiles.paste",
+          "when": "view == smart-page-translator-root-files && (viewItem == rootFilesRoot || viewItem == rootFilesFolder)",
+          "group": "3_clipboard@3"
+        },
+        {
           "command": "smartPageTranslator.rootFiles.copyPath",
           "when": "view == smart-page-translator-root-files && (viewItem == rootFilesRoot || viewItem == rootFilesFolder || viewItem == rootFilesFile)",
-          "group": "3_workspace@1"
+          "group": "4_workspace@1"
         },
         {
           "command": "smartPageTranslator.rootFiles.revealInOS",
           "when": "view == smart-page-translator-root-files && (viewItem == rootFilesRoot || viewItem == rootFilesFolder || viewItem == rootFilesFile)",
-          "group": "3_workspace@2"
+          "group": "4_workspace@2"
         },
         {
           "command": "smartPageTranslator.rootFiles.refresh",
           "when": "view == smart-page-translator-root-files && (viewItem == rootFilesRoot || viewItem == rootFilesFolder)",
-          "group": "3_workspace@3"
+          "group": "4_workspace@3"
         },
         {
           "command": "smartPageTranslator.notes.renameNote",
@@ -441,6 +477,24 @@
         "command": "smartPageTranslator.notes.newNote",
         "key": "alt+n",
         "mac": "alt+n"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.copy",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == smart-page-translator-root-files"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.cut",
+        "key": "ctrl+x",
+        "mac": "cmd+x",
+        "when": "focusedView == smart-page-translator-root-files"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.paste",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "focusedView == smart-page-translator-root-files"
       }
     ],
     "viewsWelcome": [

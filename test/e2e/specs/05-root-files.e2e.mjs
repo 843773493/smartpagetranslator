@@ -28,6 +28,10 @@ describe('Smart Page Translator root file tree E2E', () => {
     const renamedFile = path.join(sandboxDir, 'renamed.txt');
     const createdFolder = path.join(sandboxDir, 'created-folder');
     const renamedFolder = path.join(sandboxDir, 'renamed-folder');
+    const copyTargetFolder = path.join(sandboxDir, 'copied-files');
+    const copiedFile = path.join(copyTargetFolder, 'renamed.txt');
+    const moveTargetFolder = path.join(sandboxDir, 'moved-files');
+    const movedFile = path.join(moveTargetFolder, 'renamed.txt');
 
     fs.rmSync(sandboxDir, { recursive: true, force: true });
     fs.mkdirSync(sandboxDir, { recursive: true });
@@ -73,6 +77,22 @@ describe('Smart Page Translator root file tree E2E', () => {
     const copiedPath = await browser.executeWorkbench((vscode) => vscode.env.clipboard.readText());
     assert.equal(copiedPath, renamedFile);
 
+    await executeCommandWithInputOnFile(COMMANDS.rootFiles.newFolder, 'copied-files', sandboxDir);
+    await waitForPath(copyTargetFolder, true);
+
+    await executeCommandOnFile(COMMANDS.rootFiles.copy, renamedFile);
+    await executeCommandOnFile(COMMANDS.rootFiles.paste, copyTargetFolder);
+    await waitForPath(copiedFile, true);
+    assert.equal(fs.existsSync(renamedFile), true);
+
+    await executeCommandWithInputOnFile(COMMANDS.rootFiles.newFolder, 'moved-files', sandboxDir);
+    await waitForPath(moveTargetFolder, true);
+
+    await executeCommandOnFile(COMMANDS.rootFiles.cut, copiedFile);
+    await executeCommandOnFile(COMMANDS.rootFiles.paste, moveTargetFolder);
+    await waitForPath(movedFile, true);
+    assert.equal(fs.existsSync(copiedFile), false);
+
     await executeCommandWithInputOnFile(COMMANDS.rootFiles.newFolder, 'created-folder', sandboxDir);
     await waitForPath(createdFolder, true);
 
@@ -85,5 +105,11 @@ describe('Smart Page Translator root file tree E2E', () => {
 
     await executeCommandWithWarningChoiceOnFile(COMMANDS.rootFiles.delete, '永久删除', renamedFolder);
     await waitForPath(renamedFolder, false);
+
+    await executeCommandWithWarningChoiceOnFile(COMMANDS.rootFiles.delete, '永久删除', copyTargetFolder);
+    await waitForPath(copyTargetFolder, false);
+
+    await executeCommandWithWarningChoiceOnFile(COMMANDS.rootFiles.delete, '永久删除', moveTargetFolder);
+    await waitForPath(moveTargetFolder, false);
   });
 });
