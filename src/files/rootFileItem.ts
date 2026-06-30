@@ -1,0 +1,72 @@
+import * as path from 'path';
+import * as vscode from 'vscode';
+
+export type RootFileItemKind = 'file' | 'directory' | 'message';
+
+export class RootFileItem extends vscode.TreeItem {
+	public readonly kind: RootFileItemKind;
+
+	constructor(
+		public readonly uri: vscode.Uri,
+		public readonly name: string,
+		kind: RootFileItemKind,
+		collapsibleState: vscode.TreeItemCollapsibleState,
+		public readonly isRoot: boolean = false
+	) {
+		super(name, collapsibleState);
+		this.kind = kind;
+		this.id = kind === 'message' ? `message:${name}` : uri.toString();
+		this.tooltip = kind === 'message' ? name : uri.fsPath;
+		this.resourceUri = kind === 'message' ? undefined : uri;
+		this.contextValue = this.resolveContextValue(kind, isRoot);
+
+		if (kind === 'directory') {
+			this.iconPath = new vscode.ThemeIcon(isRoot ? 'root-folder' : 'folder');
+		} else if (kind === 'file') {
+			this.iconPath = vscode.ThemeIcon.File;
+			this.command = {
+				command: 'smartPageTranslator.rootFiles.open',
+				title: '打开文件',
+				arguments: [this]
+			};
+		} else {
+			this.iconPath = new vscode.ThemeIcon('warning');
+		}
+	}
+
+	public static fromUri(uri: vscode.Uri, type: vscode.FileType, isRoot = false): RootFileItem {
+		const isDirectory = (type & vscode.FileType.Directory) === vscode.FileType.Directory;
+		const basename = path.basename(uri.fsPath);
+		const name = basename || uri.fsPath || uri.path || uri.toString();
+		return new RootFileItem(
+			uri,
+			name,
+			isDirectory ? 'directory' : 'file',
+			isDirectory
+				? (isRoot ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed)
+				: vscode.TreeItemCollapsibleState.None,
+			isRoot
+		);
+	}
+
+	public static message(message: string): RootFileItem {
+		return new RootFileItem(
+			vscode.Uri.parse('smart-page-translator-root-files:/message'),
+			message,
+			'message',
+			vscode.TreeItemCollapsibleState.None
+		);
+	}
+
+	private resolveContextValue(kind: RootFileItemKind, isRoot: boolean): string {
+		if (kind === 'message') {
+			return 'rootFilesMessage';
+		}
+
+		if (isRoot) {
+			return 'rootFilesRoot';
+		}
+
+		return kind === 'directory' ? 'rootFilesFolder' : 'rootFilesFile';
+	}
+}

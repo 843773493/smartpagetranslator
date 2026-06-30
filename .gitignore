@@ -5,14 +5,20 @@ node_modules/
 out/
 dist/
 temp/
+.tmp/
 
 # VS Code
-.vscode/
+.vscode/*
+!.vscode/AGENTS.md
+!.vscode/launch.json
+!.vscode/tasks.json
 .vscode-test/
+.wdio-vscode-cache/
 reference_repo/
 
 # Build artifacts
 build/
+e2e/artifacts/
 *.vsix
 tsconfig.tsbuildinfo
 

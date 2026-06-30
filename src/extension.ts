@@ -3,6 +3,8 @@ import { registerAstOutlineCommand } from './commands/astOutline';
 import { registerRunPytestCommand } from './commands/runPytest';
 import { registerRunWithTsxCommand } from './commands/runWithTsx';
 import { registerTranslateCommand } from './commands/translate';
+import { registerRootFileCommands } from './files/rootFileCommands';
+import { RootFileTreeProvider } from './files/rootFileTreeProvider';
 import { getNotesExtensions, getNotesLocation, registerNotesCommands } from './notes/notesCommands';
 import { NotesViewProvider } from './notes/notesViewProvider';
 import { log } from './utils/logger';
@@ -26,6 +28,15 @@ export function activate(context: vscode.ExtensionContext) {
     logFn('Extension', 'registerRunWithTsxCommand DONE');
     registerRunPytestCommand(context, logFn);
     logFn('Extension', 'registerRunPytestCommand DONE');
+
+    const rootFileTree = new RootFileTreeProvider();
+    const rootFileTreeView = vscode.window.createTreeView('smart-page-translator-root-files', {
+        treeDataProvider: rootFileTree,
+        showCollapseAll: true
+    });
+    context.subscriptions.push(rootFileTreeView);
+    registerRootFileCommands(context, rootFileTree, rootFileTreeView);
+    logFn('Extension', 'RootFileTreeProvider registered DONE');
 
     let notesTree: NotesViewProvider | undefined;
 

@@ -2,6 +2,8 @@ import { translate } from 'bing-translate-api';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
+let useDeterministicTranslator = false;
+
 export function registerTranslateCommand(
     context: vscode.ExtensionContext,
     output: vscode.OutputChannel,
@@ -112,9 +114,9 @@ export function registerTranslateCommand(
 
                                     const batch = chunks.slice(i, i + concurrency).map((chunk, idx) => {
                                         const index = i + idx;
-                                        return translate(chunk, null, 'zh-Hans')
-                                            .then(res => {
-                                                results[index] = res.translation ?? '';
+                                        return translateChunk(chunk, 'zh-Hans')
+                                            .then(translatedChunk => {
+                                                results[index] = translatedChunk;
                                                 logFn(docLabel, `Chunk ${index + 1}/${chunks.length} translated (len=${results[index].length})`);
                                                 progress.report({ message: `Translating chunk ${index + 1}/${chunks.length}` });
                                             })
@@ -193,4 +195,21 @@ export function registerTranslateCommand(
     );
 
     context.subscriptions.push(disposable);
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'smartPageTranslator.internal.useDeterministicTranslator',
+            (enabled = true) => {
+                useDeterministicTranslator = Boolean(enabled);
+            },
+        )
+    );
+}
+
+async function translateChunk(chunk: string, to: string): Promise<string> {
+    if (useDeterministicTranslator) {
+        return `[${to}] ${chunk}`;
+    }
+
+    const res = await translate(chunk, null, to);
+    return res.translation ?? '';
 }

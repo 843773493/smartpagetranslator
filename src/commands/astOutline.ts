@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import * as vscode from 'vscode';
 
+let lastAstOutline = '';
+
 export function registerAstOutlineCommand(
     context: vscode.ExtensionContext,
     logFn: (label: string, message: string) => void,
@@ -48,6 +50,7 @@ export function registerAstOutlineCommand(
 
                 const outline = result.stdout;
                 await vscode.env.clipboard.writeText(outline);
+                lastAstOutline = outline;
                 vscode.window.showInformationMessage('AST outline copied to clipboard!');
                 logFn('AST', 'Outline copied to clipboard');
             } catch (error) {
@@ -58,4 +61,10 @@ export function registerAstOutlineCommand(
     );
 
     context.subscriptions.push(disposable);
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            'smartPageTranslator.internal.getLastAstOutline',
+            () => lastAstOutline,
+        )
+    );
 }

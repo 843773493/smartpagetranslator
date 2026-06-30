@@ -1,0 +1,68 @@
+export const EXTENSION_ID = '843773493.smart-page-translator';
+
+export const VIEW_CONTAINER_ID = 'smart-page-translator-notes';
+export const NOTES_VIEW_ID = 'notes';
+export const ROOT_FILES_VIEW_ID = 'smart-page-translator-root-files';
+export const OPEN_NOTES_VIEW_COMMAND = `workbench.view.extension.${VIEW_CONTAINER_ID}`;
+export const OPEN_EXPLORER_VIEW_COMMAND = 'workbench.view.explorer';
+export const FOCUS_ROOT_FILES_VIEW_COMMAND = `${ROOT_FILES_VIEW_ID}.focus`;
+
+export const COMMANDS = {
+  translate: 'smartPageTranslator.translate',
+  extractAstOutline: 'smartPageTranslator.extractAstOutline',
+  runWithTsx: 'smartPageTranslator.runWithTsx',
+  runPytest: 'smartPageTranslator.runPytest',
+  rootFiles: {
+    copyPath: 'smartPageTranslator.rootFiles.copyPath',
+    delete: 'smartPageTranslator.rootFiles.delete',
+    newFile: 'smartPageTranslator.rootFiles.newFile',
+    newFolder: 'smartPageTranslator.rootFiles.newFolder',
+    open: 'smartPageTranslator.rootFiles.open',
+    refresh: 'smartPageTranslator.rootFiles.refresh',
+    rename: 'smartPageTranslator.rootFiles.rename',
+    revealInOS: 'smartPageTranslator.rootFiles.revealInOS'
+  },
+  // 仅供 E2E 使用的测试接缝，不注册到 package.json 的 UI commands。
+  // 改名或删除时必须同步根 AGENTS.md 和相关 spec。
+  internal: {
+    getLastAstOutline: 'smartPageTranslator.internal.getLastAstOutline',
+    useDeterministicTranslator: 'smartPageTranslator.internal.useDeterministicTranslator'
+  },
+  notes: {
+    deleteNote: 'smartPageTranslator.notes.deleteNote',
+    deleteFolder: 'smartPageTranslator.notes.deleteFolder',
+    listNotes: 'smartPageTranslator.notes.listNotes',
+    newNote: 'smartPageTranslator.notes.newNote',
+    newFolder: 'smartPageTranslator.notes.newFolder',
+    openNote: 'smartPageTranslator.notes.openNote',
+    refreshNotes: 'smartPageTranslator.notes.refreshNotes',
+    renameNote: 'smartPageTranslator.notes.renameNote',
+    renameFolder: 'smartPageTranslator.notes.renameFolder',
+    setupNotes: 'smartPageTranslator.notes.setupNotes'
+  }
+};
+
+export const REQUIRED_COMMANDS = [
+  COMMANDS.translate,
+  COMMANDS.extractAstOutline,
+  COMMANDS.runWithTsx,
+  COMMANDS.runPytest,
+  COMMANDS.rootFiles.copyPath,
+  COMMANDS.rootFiles.delete,
+  COMMANDS.rootFiles.newFile,
+  COMMANDS.rootFiles.newFolder,
+  COMMANDS.rootFiles.open,
+  COMMANDS.rootFiles.refresh,
+  COMMANDS.rootFiles.rename,
+  COMMANDS.rootFiles.revealInOS,
+  COMMANDS.notes.deleteNote,
+  COMMANDS.notes.deleteFolder,
+  COMMANDS.notes.listNotes,
+  COMMANDS.notes.newNote,
+  COMMANDS.notes.newFolder,
+  COMMANDS.notes.openNote,
+  COMMANDS.notes.refreshNotes,
+  COMMANDS.notes.renameNote,
+  COMMANDS.notes.renameFolder,
+  COMMANDS.notes.setupNotes
+];

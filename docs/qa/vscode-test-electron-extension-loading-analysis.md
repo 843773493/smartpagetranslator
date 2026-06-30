@@ -1,5 +1,7 @@
 # `@vscode/test-electron` 扩展加载异常交接分析
 
+> 历史归档：本文记录旧 `@vscode/test-electron` 测试入口的问题排查，不代表当前测试入口。当前测试体系以根 `AGENTS.md` 和 `npm test` 的 WDIO E2E 为准；不要按本文恢复 `.vscode-test.mjs`、`src/test/**` 或 `vscode-test`。
+
 ## 0. 一句话结论
 
 当前问题的核心不应继续优先排查命令注册或激活事件，而应先证明：

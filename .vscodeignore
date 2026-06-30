@@ -1,3 +1,8 @@
 .vscode-test
 dist
 *.vsix
+e2e
+test-fixtures
+test/e2e
+.wdio-vscode-cache
+wdio*.conf.mjs

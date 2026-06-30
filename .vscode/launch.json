@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Smart Page Translator Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--new-window",
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-workspace-trust",
+        "--skip-welcome"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "preLaunchTask": "npm: compile"
+    },
+    {
+      "name": "Debug Smart Page Translator Extension (Local Isolated Fixture)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--new-window",
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--user-data-dir=${workspaceFolder}/.tmp/debug-host/user-data",
+        "--extensions-dir=${workspaceFolder}/.tmp/debug-host/extensions",
+        "--disable-workspace-trust",
+        "--skip-welcome",
+        "${workspaceFolder}/test-fixtures/workspace"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "preLaunchTask": "npm: compile"
+    }
+  ]
+}
