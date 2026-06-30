@@ -17,4 +17,5 @@
 
 - 性能优先：只读取用户展开的一层目录，外部变化由刷新命令处理。
 - 文件系统操作优先使用 VS Code 原生 API；只有原生 API 不满足时再考虑第三方包。
+- Remote-SSH 下必须保留 `vscode-remote://` 的 scheme 和 authority，不要用 `vscode.Uri.file(uri.fsPath)` 重建远程资源。
 - 删除、重命名等破坏性操作必须给用户确认或错误提示。

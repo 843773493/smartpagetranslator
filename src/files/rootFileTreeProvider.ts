@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { RootFileItem } from './rootFileItem';
+import { localRootUriOf, parentUriOf, rootUriOf } from './rootFileUri';
 
 type CachedChildren = {
 	readonly createdAt: number;
@@ -46,11 +47,7 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 	}
 
 	public parentUri(uri: vscode.Uri): vscode.Uri {
-		const parentPath = path.dirname(uri.fsPath);
-		if (parentPath === uri.fsPath) {
-			return uri;
-		}
-		return vscode.Uri.file(parentPath);
+		return parentUriOf(uri);
 	}
 
 	private async getRootItems(): Promise<RootFileItem[]> {
@@ -77,27 +74,29 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 
 	private getCandidateRootUris(): vscode.Uri[] {
 		const roots = new Map<string, vscode.Uri>();
-		const addRoot = (rootPath: string | undefined): void => {
+		const addUri = (uri: vscode.Uri): void => {
+			roots.set(uri.toString().toLowerCase(), uri);
+		};
+		const addLocalRoot = (rootPath: string | undefined): void => {
 			if (!rootPath) {
 				return;
 			}
-			const parsedRoot = path.parse(rootPath).root || rootPath;
-			const normalizedRoot = path.resolve(parsedRoot);
-			roots.set(normalizedRoot.toLowerCase(), vscode.Uri.file(normalizedRoot));
+			addUri(localRootUriOf(rootPath));
 		};
 
-		addRoot(process.cwd());
-		addRoot(process.env.SystemDrive);
-		addRoot(process.env.HOMEDRIVE);
-
+		const workspaceFolders = vscode.workspace.workspaceFolders || [];
 		for (const folder of vscode.workspace.workspaceFolders || []) {
-			if (folder.uri.scheme === 'file') {
-				addRoot(folder.uri.fsPath);
-			}
+			addUri(rootUriOf(folder.uri));
+		}
+
+		if (workspaceFolders.length === 0 || workspaceFolders.every(folder => folder.uri.scheme === 'file')) {
+			addLocalRoot(process.cwd());
+			addLocalRoot(process.env.SystemDrive);
+			addLocalRoot(process.env.HOMEDRIVE);
 		}
 
 		if (roots.size === 0) {
-			addRoot(path.parse(process.cwd()).root);
+			addLocalRoot(path.parse(process.cwd()).root);
 		}
 
 		return [...roots.values()];

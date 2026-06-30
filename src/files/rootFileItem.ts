@@ -1,5 +1,5 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
+import { displayPathOfUri, labelOfUri } from './rootFileUri';
 
 export type RootFileItemKind = 'file' | 'directory' | 'message';
 
@@ -16,7 +16,7 @@ export class RootFileItem extends vscode.TreeItem {
 		super(name, collapsibleState);
 		this.kind = kind;
 		this.id = kind === 'message' ? `message:${name}` : uri.toString();
-		this.tooltip = kind === 'message' ? name : uri.fsPath;
+		this.tooltip = kind === 'message' ? name : displayPathOfUri(uri);
 		this.resourceUri = kind === 'message' ? undefined : uri;
 		this.contextValue = this.resolveContextValue(kind, isRoot);
 
@@ -36,8 +36,7 @@ export class RootFileItem extends vscode.TreeItem {
 
 	public static fromUri(uri: vscode.Uri, type: vscode.FileType, isRoot = false): RootFileItem {
 		const isDirectory = (type & vscode.FileType.Directory) === vscode.FileType.Directory;
-		const basename = path.basename(uri.fsPath);
-		const name = basename || uri.fsPath || uri.path || uri.toString();
+		const name = labelOfUri(uri, isRoot);
 		return new RootFileItem(
 			uri,
 			name,

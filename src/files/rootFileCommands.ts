@@ -1,7 +1,7 @@
-import * as path from 'path';
 import * as vscode from 'vscode';
 import { RootFileItem } from './rootFileItem';
 import { RootFileTreeProvider } from './rootFileTreeProvider';
+import { basenameOfUri, displayPathOfUri, localRootUriOf, parentUriOf } from './rootFileUri';
 
 type FileCommandTarget = RootFileItem | vscode.Uri | string | undefined;
 
@@ -70,7 +70,7 @@ export function registerRootFileCommands(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.copyPath', async (target?: FileCommandTarget) => {
 			const uri = requireUri(target);
 			await vscode.env.clipboard.writeText(uri.fsPath);
-			void vscode.window.showInformationMessage(`已复制路径：${uri.fsPath}`);
+			void vscode.window.showInformationMessage(`已复制路径：${displayPathOfUri(uri)}`);
 		})
 	);
 
@@ -96,7 +96,7 @@ async function openFile(target?: FileCommandTarget): Promise<void> {
 
 async function createFile(target?: FileCommandTarget): Promise<vscode.Uri | undefined> {
 	const directory = await resolveDirectory(target);
-	const name = await askEntryName('新文件名称？');
+	const name = await askEntryName('新文件名称？', '', directory);
 	if (!name) {
 		return undefined;
 	}
@@ -120,7 +120,7 @@ async function createFile(target?: FileCommandTarget): Promise<vscode.Uri | unde
 
 async function createFolder(target?: FileCommandTarget): Promise<vscode.Uri | undefined> {
 	const directory = await resolveDirectory(target);
-	const name = await askEntryName('新文件夹名称？');
+	const name = await askEntryName('新文件夹名称？', '', directory);
 	if (!name) {
 		return undefined;
 	}
@@ -142,13 +142,13 @@ async function createFolder(target?: FileCommandTarget): Promise<vscode.Uri | un
 
 async function renameEntry(target?: FileCommandTarget): Promise<{ oldUri: vscode.Uri; newUri: vscode.Uri } | undefined> {
 	const uri = requireUri(target);
-	const oldName = path.basename(uri.fsPath);
-	const newName = await askEntryName('新名称？', oldName);
+	const oldName = basenameOfUri(uri);
+	const newName = await askEntryName('新名称？', oldName, parentUriOf(uri));
 	if (!newName || newName === oldName) {
 		return undefined;
 	}
 
-	const newUri = vscode.Uri.joinPath(vscode.Uri.file(path.dirname(uri.fsPath)), newName);
+	const newUri = vscode.Uri.joinPath(parentUriOf(uri), newName);
 	if (await pathExists(newUri)) {
 		await vscode.window.showWarningMessage(`'${newName}' 已存在。`);
 		return undefined;
@@ -165,7 +165,7 @@ async function renameEntry(target?: FileCommandTarget): Promise<{ oldUri: vscode
 
 async function deleteEntry(target?: FileCommandTarget): Promise<vscode.Uri | undefined> {
 	const uri = requireUri(target);
-	const basename = path.basename(uri.fsPath) || uri.fsPath;
+	const basename = basenameOfUri(uri) || displayPathOfUri(uri);
 	const selected = await vscode.window.showWarningMessage(
 		`确定要删除 '${basename}' 吗？`,
 		{ modal: true },
@@ -196,7 +196,7 @@ async function resolveDirectory(target?: FileCommandTarget): Promise<vscode.Uri>
 		if (roots && roots.length > 0) {
 			return roots[0].uri;
 		}
-		return vscode.Uri.file(path.parse(process.cwd()).root);
+		return localRootUriOf(process.cwd());
 	}
 
 	const stat = await vscode.workspace.fs.stat(uri);
@@ -204,18 +204,18 @@ async function resolveDirectory(target?: FileCommandTarget): Promise<vscode.Uri>
 		return uri;
 	}
 
-	return vscode.Uri.file(path.dirname(uri.fsPath));
+	return parentUriOf(uri);
 }
 
-async function askEntryName(prompt: string, value = ''): Promise<string | undefined> {
+async function askEntryName(prompt: string, value = '', targetDirectory?: vscode.Uri): Promise<string | undefined> {
 	return vscode.window.showInputBox({
 		prompt,
 		value,
-		validateInput: validateEntryName
+		validateInput: (input) => validateEntryName(input, targetDirectory)
 	});
 }
 
-function validateEntryName(value: string): string | undefined {
+function validateEntryName(value: string, targetDirectory?: vscode.Uri): string | undefined {
 	const name = value.trim();
 	if (!name) {
 		return '名称不能为空。';
@@ -226,7 +226,7 @@ function validateEntryName(value: string): string | undefined {
 	if (name.includes('/') || name.includes('\\')) {
 		return '名称不能包含路径分隔符。';
 	}
-	if (process.platform === 'win32' && /[<>:"|?*]/.test(name)) {
+	if (targetDirectory?.scheme === 'file' && process.platform === 'win32' && /[<>:"|?*]/.test(name)) {
 		return '名称包含 Windows 不支持的字符。';
 	}
 	return undefined;
@@ -285,6 +285,12 @@ async function revealIfVisible(treeView: vscode.TreeView<RootFileItem>, uri: vsc
 }
 
 async function revealInOS(uri: vscode.Uri): Promise<void> {
+	if (uri.scheme !== 'file') {
+		await vscode.env.clipboard.writeText(uri.fsPath);
+		void vscode.window.showInformationMessage('远程资源不能在本机系统文件管理器中直接显示，已复制远程路径。');
+		return;
+	}
+
 	try {
 		await vscode.commands.executeCommand('revealFileInOS', uri);
 	} catch {
