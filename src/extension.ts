@@ -29,7 +29,10 @@ export function activate(context: vscode.ExtensionContext) {
     registerRunPytestCommand(context, logFn);
     logFn('Extension', 'registerRunPytestCommand DONE');
 
-    const rootFileTree = new RootFileTreeProvider();
+    const rootFileTree = new RootFileTreeProvider({
+        remoteName: vscode.env.remoteName,
+        extensionKind: context.extension.extensionKind
+    });
     const rootFileTreeView = vscode.window.createTreeView('smart-page-translator-root-files', {
         treeDataProvider: rootFileTree,
         showCollapseAll: true

@@ -18,6 +18,7 @@
 - 性能优先：只读取用户展开的一层目录，外部变化由刷新命令处理。
 - 文件系统操作优先使用 VS Code 原生 API；只有原生 API 不满足时再考虑第三方包。
 - Remote-SSH 下必须保留 `vscode-remote://` 的 scheme 和 authority，不要用 `vscode.Uri.file(uri.fsPath)` 重建远程资源。
+- UI host 中若已连接 Remote-SSH 但尚未打开 workspace，不要退回显示本地磁盘；应提示用户打开远程文件夹。
 - 复制、剪切、粘贴使用扩展内存中的文件操作剪贴板，不要覆盖系统文本剪贴板；必须支持本地、Remote-SSH、不同 SSH host 之间跨文件系统粘贴。
 - 同一文件系统内复制/移动优先使用 `vscode.workspace.fs.copy/rename`；跨文件系统时使用 `readDirectory/readFile/writeFile/createDirectory` 递归复制，剪切必须先复制成功再删除源。
 - 删除、重命名等破坏性操作必须给用户确认或错误提示。

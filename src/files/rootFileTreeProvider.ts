@@ -10,10 +10,17 @@ type CachedChildren = {
 
 const CACHE_TTL_MS = 30_000;
 
+type RootFileTreeRuntime = {
+	readonly remoteName?: string;
+	readonly extensionKind: vscode.ExtensionKind;
+};
+
 export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileItem> {
 	private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<RootFileItem | undefined>();
 	public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 	private readonly childrenCache = new Map<string, CachedChildren>();
+
+	constructor(private readonly runtime: RootFileTreeRuntime) {}
 
 	public getTreeItem(item: RootFileItem): vscode.TreeItem {
 		return item;
@@ -52,6 +59,10 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 
 	private async getRootItems(): Promise<RootFileItem[]> {
 		const roots = this.getCandidateRootUris();
+		if (roots.length === 0 && this.isWaitingForRemoteWorkspace()) {
+			return [RootFileItem.message('已连接 Remote-SSH。打开一个远程文件夹后显示服务器根目录。')];
+		}
+
 		const items: RootFileItem[] = [];
 
 		for (const uri of roots) {
@@ -89,6 +100,10 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 			addUri(rootUriOf(folder.uri));
 		}
 
+		if (workspaceFolders.length === 0 && this.isWaitingForRemoteWorkspace()) {
+			return [];
+		}
+
 		if (workspaceFolders.length === 0 || workspaceFolders.every(folder => folder.uri.scheme === 'file')) {
 			addLocalRoot(process.cwd());
 			addLocalRoot(process.env.SystemDrive);
@@ -100,6 +115,12 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 		}
 
 		return [...roots.values()];
+	}
+
+	private isWaitingForRemoteWorkspace(): boolean {
+		return Boolean(this.runtime.remoteName)
+			&& this.runtime.extensionKind === vscode.ExtensionKind.UI
+			&& (vscode.workspace.workspaceFolders || []).length === 0;
 	}
 
 	private async getDirectoryChildren(uri: vscode.Uri): Promise<RootFileItem[]> {
