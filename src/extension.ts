@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
     const rootFileTree = new RootFileTreeProvider({
         remoteName: vscode.env.remoteName,
         extensionKind: context.extension.extensionKind
-    });
+    }, context.globalState);
     const rootFileTreeView = vscode.window.createTreeView('smart-page-translator-root-files', {
         treeDataProvider: rootFileTree,
         showCollapseAll: true

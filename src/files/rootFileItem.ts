@@ -11,7 +11,8 @@ export class RootFileItem extends vscode.TreeItem {
 		public readonly name: string,
 		kind: RootFileItemKind,
 		collapsibleState: vscode.TreeItemCollapsibleState,
-		public readonly isRoot: boolean = false
+		public readonly isRoot: boolean = false,
+		public readonly isShortcutRoot: boolean = false
 	) {
 		super(name, collapsibleState);
 		this.kind = kind;
@@ -19,8 +20,11 @@ export class RootFileItem extends vscode.TreeItem {
 		this.tooltip = kind === 'message' ? name : displayPathOfUri(uri);
 		this.resourceUri = kind === 'message' ? undefined : uri;
 		this.contextValue = this.resolveContextValue(kind, isRoot);
+		this.description = isShortcutRoot ? '快捷路径' : undefined;
 
-		if (kind === 'directory') {
+		if (isShortcutRoot) {
+			this.iconPath = new vscode.ThemeIcon('bookmark');
+		} else if (kind === 'directory') {
 			this.iconPath = new vscode.ThemeIcon(isRoot ? 'root-folder' : 'folder');
 		} else if (kind === 'file') {
 			this.iconPath = vscode.ThemeIcon.File;
@@ -34,7 +38,7 @@ export class RootFileItem extends vscode.TreeItem {
 		}
 	}
 
-	public static fromUri(uri: vscode.Uri, type: vscode.FileType, isRoot = false): RootFileItem {
+	public static fromUri(uri: vscode.Uri, type: vscode.FileType, isRoot = false, isShortcutRoot = false): RootFileItem {
 		const isDirectory = (type & vscode.FileType.Directory) === vscode.FileType.Directory;
 		const name = labelOfUri(uri, isRoot);
 		return new RootFileItem(
@@ -44,7 +48,8 @@ export class RootFileItem extends vscode.TreeItem {
 			isDirectory
 				? (isRoot ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed)
 				: vscode.TreeItemCollapsibleState.None,
-			isRoot
+			isRoot,
+			isShortcutRoot
 		);
 	}
 
@@ -63,7 +68,7 @@ export class RootFileItem extends vscode.TreeItem {
 		}
 
 		if (isRoot) {
-			return 'rootFilesRoot';
+			return this.isShortcutRoot ? 'rootFilesShortcutRoot' : 'rootFilesRoot';
 		}
 
 		return kind === 'directory' ? 'rootFilesFolder' : 'rootFilesFile';

@@ -9,6 +9,7 @@ type CachedChildren = {
 };
 
 const CACHE_TTL_MS = 30_000;
+const QUICK_PATHS_KEY = 'rootFiles.quickPaths';
 
 type RootFileTreeRuntime = {
 	readonly remoteName?: string;
@@ -19,8 +20,14 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 	private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<RootFileItem | undefined>();
 	public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 	private readonly childrenCache = new Map<string, CachedChildren>();
+	private quickPathUris: vscode.Uri[];
 
-	constructor(private readonly runtime: RootFileTreeRuntime) {}
+	constructor(
+		private readonly runtime: RootFileTreeRuntime,
+		private readonly storage: vscode.Memento
+	) {
+		this.quickPathUris = this.loadQuickPathUris();
+	}
 
 	public getTreeItem(item: RootFileItem): vscode.TreeItem {
 		return item;
@@ -57,13 +64,43 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 		return parentUriOf(uri);
 	}
 
+	public async addQuickPath(uri: vscode.Uri): Promise<boolean> {
+		const stat = await vscode.workspace.fs.stat(uri);
+		if ((stat.type & vscode.FileType.Directory) !== vscode.FileType.Directory) {
+			return false;
+		}
+
+		if (this.quickPathUris.some(existing => existing.toString() === uri.toString())) {
+			return false;
+		}
+
+		this.quickPathUris = [...this.quickPathUris, uri];
+		await this.saveQuickPathUris();
+		this.refresh();
+		return true;
+	}
+
+	public async removeQuickPath(uri: vscode.Uri): Promise<boolean> {
+		const nextUris = this.quickPathUris.filter(existing => existing.toString() !== uri.toString());
+		if (nextUris.length === this.quickPathUris.length) {
+			return false;
+		}
+
+		this.quickPathUris = nextUris;
+		await this.saveQuickPathUris();
+		this.refresh();
+		return true;
+	}
+
 	private async getRootItems(): Promise<RootFileItem[]> {
 		const roots = this.getCandidateRootUris();
-		if (roots.length === 0 && this.isWaitingForRemoteWorkspace()) {
+		const quickPathItems = this.getQuickPathRootItems();
+
+		if (roots.length === 0 && quickPathItems.length === 0 && this.isWaitingForRemoteWorkspace()) {
 			return [RootFileItem.message('已连接 Remote-SSH。打开一个远程文件夹后显示服务器根目录。')];
 		}
 
-		const items: RootFileItem[] = [];
+		const items: RootFileItem[] = [...quickPathItems];
 
 		for (const uri of roots) {
 			try {
@@ -81,6 +118,19 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 		}
 
 		return items.sort(compareRootFileItems);
+	}
+
+	private getQuickPathRootItems(): RootFileItem[] {
+		return this.quickPathUris.map(uri => RootFileItem.fromUri(uri, vscode.FileType.Directory, true, true));
+	}
+
+	private loadQuickPathUris(): vscode.Uri[] {
+		const values = this.storage.get<string[]>(QUICK_PATHS_KEY, []);
+		return values.map(value => vscode.Uri.parse(value));
+	}
+
+	private async saveQuickPathUris(): Promise<void> {
+		await this.storage.update(QUICK_PATHS_KEY, this.quickPathUris.map(uri => uri.toString()));
 	}
 
 	private getCandidateRootUris(): vscode.Uri[] {

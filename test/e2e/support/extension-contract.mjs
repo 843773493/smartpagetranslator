@@ -13,6 +13,7 @@ export const COMMANDS = {
   runWithTsx: 'smartPageTranslator.runWithTsx',
   runPytest: 'smartPageTranslator.runPytest',
   rootFiles: {
+    addQuickPath: 'smartPageTranslator.rootFiles.addQuickPath',
     copy: 'smartPageTranslator.rootFiles.copy',
     copyPath: 'smartPageTranslator.rootFiles.copyPath',
     cut: 'smartPageTranslator.rootFiles.cut',
@@ -22,6 +23,7 @@ export const COMMANDS = {
     open: 'smartPageTranslator.rootFiles.open',
     paste: 'smartPageTranslator.rootFiles.paste',
     refresh: 'smartPageTranslator.rootFiles.refresh',
+    removeQuickPath: 'smartPageTranslator.rootFiles.removeQuickPath',
     rename: 'smartPageTranslator.rootFiles.rename',
     revealInOS: 'smartPageTranslator.rootFiles.revealInOS'
   },
@@ -50,6 +52,7 @@ export const REQUIRED_COMMANDS = [
   COMMANDS.extractAstOutline,
   COMMANDS.runWithTsx,
   COMMANDS.runPytest,
+  COMMANDS.rootFiles.addQuickPath,
   COMMANDS.rootFiles.copy,
   COMMANDS.rootFiles.copyPath,
   COMMANDS.rootFiles.cut,
@@ -59,6 +62,7 @@ export const REQUIRED_COMMANDS = [
   COMMANDS.rootFiles.open,
   COMMANDS.rootFiles.paste,
   COMMANDS.rootFiles.refresh,
+  COMMANDS.rootFiles.removeQuickPath,
   COMMANDS.rootFiles.rename,
   COMMANDS.rootFiles.revealInOS,
   COMMANDS.notes.deleteNote,

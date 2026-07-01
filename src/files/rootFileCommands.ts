@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { RootFileItem } from './rootFileItem';
 import { RootFileTreeProvider } from './rootFileTreeProvider';
-import { basenameOfUri, displayPathOfUri, localRootUriOf, parentUriOf } from './rootFileUri';
+import { basenameOfUri, clipboardPathOfUri, displayPathOfUri, localRootUriOf, parentUriOf } from './rootFileUri';
 
 type FileCommandTarget = RootFileItem | vscode.Uri | string | undefined;
 type ClipboardMode = 'copy' | 'cut';
@@ -106,10 +106,33 @@ export function registerRootFileCommands(
 	);
 
 	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.addQuickPath', async (target?: FileCommandTarget) => {
+			const uri = requireUri(target || selectedTreeItem(treeView));
+			const added = await tree.addQuickPath(uri);
+			if (added) {
+				void vscode.window.showInformationMessage(`已添加快捷路径：${displayPathOfUri(uri)}`);
+			} else {
+				void vscode.window.showInformationMessage(`快捷路径已存在或不是文件夹：${displayPathOfUri(uri)}`);
+			}
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.removeQuickPath', async (target?: FileCommandTarget) => {
+			const uri = requireUri(target || selectedTreeItem(treeView));
+			const removed = await tree.removeQuickPath(uri);
+			if (removed) {
+				void vscode.window.showInformationMessage(`已删除快捷路径：${displayPathOfUri(uri)}`);
+			}
+		})
+	);
+
+	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.copyPath', async (target?: FileCommandTarget) => {
 			const uri = requireUri(target || selectedTreeItem(treeView));
-			await vscode.env.clipboard.writeText(uri.fsPath);
-			void vscode.window.showInformationMessage(`已复制路径：${displayPathOfUri(uri)}`);
+			const copiedPath = clipboardPathOfUri(uri);
+			await vscode.env.clipboard.writeText(copiedPath);
+			void vscode.window.showInformationMessage(`已复制路径：${copiedPath}`);
 		})
 	);
 
@@ -477,7 +500,7 @@ async function revealIfVisible(treeView: vscode.TreeView<RootFileItem>, uri: vsc
 
 async function revealInOS(uri: vscode.Uri): Promise<void> {
 	if (uri.scheme !== 'file') {
-		await vscode.env.clipboard.writeText(uri.fsPath);
+		await vscode.env.clipboard.writeText(clipboardPathOfUri(uri));
 		void vscode.window.showInformationMessage('远程资源不能在本机系统文件管理器中直接显示，已复制远程路径。');
 		return;
 	}

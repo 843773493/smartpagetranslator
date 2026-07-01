@@ -52,6 +52,14 @@ describe('Smart Page Translator root file tree E2E', () => {
     const snapshot = await collectUiSnapshot('root-file-tree-view');
     assert.match(snapshot.document.visibleText, /根目录文件树|ROOT FILES|Root/i);
 
+    await executeCommandOnFile(COMMANDS.rootFiles.addQuickPath, sandboxDir);
+    await browser.executeWorkbench(
+      (vscode, command) => vscode.commands.executeCommand(command),
+      COMMANDS.rootFiles.refresh
+    );
+    const shortcutSnapshot = await collectUiSnapshot('root-file-tree-shortcut');
+    assert.match(shortcutSnapshot.document.visibleText, /快捷路径|root-files-e2e/);
+
     await executeCommandWithInputOnFile(COMMANDS.rootFiles.newFile, 'created.txt', sandboxDir);
     await waitForPath(createdFile, true);
     assert.equal(fs.readFileSync(createdFile, 'utf8'), '');
@@ -111,5 +119,7 @@ describe('Smart Page Translator root file tree E2E', () => {
 
     await executeCommandWithWarningChoiceOnFile(COMMANDS.rootFiles.delete, '永久删除', moveTargetFolder);
     await waitForPath(moveTargetFolder, false);
+
+    await executeCommandOnFile(COMMANDS.rootFiles.removeQuickPath, sandboxDir);
   });
 });

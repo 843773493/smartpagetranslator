@@ -13,6 +13,10 @@ export function displayPathOfUri(uri: vscode.Uri): string {
 	return uri.scheme === 'file' ? uri.fsPath : uri.toString(true);
 }
 
+export function clipboardPathOfUri(uri: vscode.Uri): string {
+	return uri.scheme === 'file' ? uri.fsPath : uri.path;
+}
+
 export function labelOfUri(uri: vscode.Uri, isRoot = false): string {
 	const basename = basenameOfUri(uri);
 	if (basename) {
