@@ -50,6 +50,23 @@ export async function switchToTopFrame() {
   await browser.switchToFrame(null);
 }
 
+export async function readVisibleTextFromFrameContainingSelector(selector) {
+  await switchToTopFrame();
+  const found = await switchToFrameContainingSelector(selector);
+  if (!found) {
+    await switchToTopFrame();
+    throw new Error(`找不到包含 ${selector} 的 frame`);
+  }
+
+  try {
+    return await browser.execute(() => String(
+      document.body?.innerText || document.body?.textContent || ''
+    ).replace(/\s+/g, ' ').trim());
+  } finally {
+    await switchToTopFrame();
+  }
+}
+
 export async function dumpExtensionState() {
   return browser.executeWorkbench(async (vscode, extensionId) => {
     const extension = vscode.extensions.getExtension(extensionId);

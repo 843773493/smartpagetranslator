@@ -12,6 +12,7 @@ export const notesPath = process.env.WDIO_NOTES_PATH || path.join(workspacePath,
 
 export const files = {
   astSample: path.join(workspacePath, 'src', 'sample.ts'),
+  htmlPreview: path.join(workspacePath, 'html-preview.html'),
   translationInput: path.join(workspacePath, 'translation-input.txt'),
   tsRunner: path.join(workspacePath, 'src', 'runner.ts'),
   pySample: path.join(workspacePath, 'python', 'test_sample.py'),

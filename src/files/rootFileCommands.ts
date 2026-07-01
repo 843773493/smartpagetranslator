@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
+import { HtmlPreviewManager } from './htmlPreview';
 import { RootFileItem } from './rootFileItem';
 import { RootFileTreeProvider } from './rootFileTreeProvider';
-import { basenameOfUri, clipboardPathOfUri, displayPathOfUri, localRootUriOf, parentUriOf } from './rootFileUri';
+import { basenameOfUri, clipboardPathOfUri, displayPathOfUri, isHtmlUri, localRootUriOf, parentUriOf } from './rootFileUri';
 
 type FileCommandTarget = RootFileItem | vscode.Uri | string | undefined;
 type ClipboardMode = 'copy' | 'cut';
@@ -21,6 +22,7 @@ export function registerRootFileCommands(
 	treeView: vscode.TreeView<RootFileItem>
 ): void {
 	let clipboard: RootFileClipboard | undefined;
+	const htmlPreview = new HtmlPreviewManager();
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.refresh', (target?: FileCommandTarget) => {
@@ -32,6 +34,12 @@ export function registerRootFileCommands(
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.open', async (target?: FileCommandTarget) => {
 			await openFile(target || selectedTreeItem(treeView));
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.previewHtml', async (target?: FileCommandTarget) => {
+			await previewHtmlFile(target || selectedTreeItem(treeView), htmlPreview);
 		})
 	);
 
@@ -154,6 +162,26 @@ async function openFile(target?: FileCommandTarget): Promise<void> {
 
 	const document = await vscode.workspace.openTextDocument(uri);
 	await vscode.window.showTextDocument(document);
+}
+
+async function previewHtmlFile(target: FileCommandTarget, htmlPreview: HtmlPreviewManager): Promise<void> {
+	try {
+		const uri = requireUri(target);
+		const stat = await vscode.workspace.fs.stat(uri);
+		if (isDirectory(stat)) {
+			void vscode.window.showWarningMessage('只能预览 HTML 文件。');
+			return;
+		}
+
+		if (!isHtmlUri(uri)) {
+			void vscode.window.showWarningMessage('只能预览 .html 或 .htm 文件。');
+			return;
+		}
+
+		await htmlPreview.open(uri);
+	} catch (err) {
+		await showFileOperationError('预览 HTML 失败', err);
+	}
 }
 
 async function createFile(target?: FileCommandTarget): Promise<vscode.Uri | undefined> {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { displayPathOfUri, labelOfUri } from './rootFileUri';
+import { displayPathOfUri, isHtmlUri, labelOfUri } from './rootFileUri';
 
 export type RootFileItemKind = 'file' | 'directory' | 'message';
 
@@ -19,7 +19,7 @@ export class RootFileItem extends vscode.TreeItem {
 		this.id = kind === 'message' ? `message:${name}` : uri.toString();
 		this.tooltip = kind === 'message' ? name : displayPathOfUri(uri);
 		this.resourceUri = kind === 'message' ? undefined : uri;
-		this.contextValue = this.resolveContextValue(kind, isRoot);
+		this.contextValue = this.resolveContextValue(uri, kind, isRoot);
 		this.description = isShortcutRoot ? '快捷路径' : undefined;
 
 		if (isShortcutRoot) {
@@ -29,8 +29,10 @@ export class RootFileItem extends vscode.TreeItem {
 		} else if (kind === 'file') {
 			this.iconPath = vscode.ThemeIcon.File;
 			this.command = {
-				command: 'smartPageTranslator.rootFiles.open',
-				title: '打开文件',
+				command: isHtmlUri(uri)
+					? 'smartPageTranslator.rootFiles.previewHtml'
+					: 'smartPageTranslator.rootFiles.open',
+				title: isHtmlUri(uri) ? '预览 HTML' : '打开文件',
 				arguments: [this]
 			};
 		} else {
@@ -62,7 +64,7 @@ export class RootFileItem extends vscode.TreeItem {
 		);
 	}
 
-	private resolveContextValue(kind: RootFileItemKind, isRoot: boolean): string {
+	private resolveContextValue(uri: vscode.Uri, kind: RootFileItemKind, isRoot: boolean): string {
 		if (kind === 'message') {
 			return 'rootFilesMessage';
 		}
@@ -71,6 +73,10 @@ export class RootFileItem extends vscode.TreeItem {
 			return this.isShortcutRoot ? 'rootFilesShortcutRoot' : 'rootFilesRoot';
 		}
 
-		return kind === 'directory' ? 'rootFilesFolder' : 'rootFilesFile';
+		if (kind === 'directory') {
+			return 'rootFilesFolder';
+		}
+
+		return isHtmlUri(uri) ? 'rootFilesHtmlFile' : 'rootFilesFile';
 	}
 }

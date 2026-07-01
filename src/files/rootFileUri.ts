@@ -30,6 +30,11 @@ export function labelOfUri(uri: vscode.Uri, isRoot = false): string {
 	return uri.fsPath || uri.path || uri.toString(true);
 }
 
+export function isHtmlUri(uri: vscode.Uri): boolean {
+	const name = basenameOfUri(uri).toLowerCase();
+	return name.endsWith('.html') || name.endsWith('.htm');
+}
+
 export function parentUriOf(uri: vscode.Uri): vscode.Uri {
 	if (uri.scheme === 'file') {
 		const parentPath = path.dirname(uri.fsPath);
