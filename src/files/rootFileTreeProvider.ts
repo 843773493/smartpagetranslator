@@ -9,7 +9,7 @@ type CachedChildren = {
 };
 
 const CACHE_TTL_MS = 30_000;
-const QUICK_PATHS_KEY = 'rootFiles.quickPaths';
+export const ROOT_FILE_QUICK_PATHS_KEY = 'rootFiles.quickPaths';
 
 type RootFileTreeRuntime = {
 	readonly remoteName?: string;
@@ -125,12 +125,12 @@ export class RootFileTreeProvider implements vscode.TreeDataProvider<RootFileIte
 	}
 
 	private loadQuickPathUris(): vscode.Uri[] {
-		const values = this.storage.get<string[]>(QUICK_PATHS_KEY, []);
+		const values = this.storage.get<string[]>(ROOT_FILE_QUICK_PATHS_KEY, []);
 		return values.map(value => vscode.Uri.parse(value));
 	}
 
 	private async saveQuickPathUris(): Promise<void> {
-		await this.storage.update(QUICK_PATHS_KEY, this.quickPathUris.map(uri => uri.toString()));
+		await this.storage.update(ROOT_FILE_QUICK_PATHS_KEY, this.quickPathUris.map(uri => uri.toString()));
 	}
 
 	private getCandidateRootUris(): vscode.Uri[] {

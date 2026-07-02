@@ -95,9 +95,10 @@ npm run artifacts:latest
    - `vscode-storage/`：隔离的 VS Code 用户数据和日志。
    - `wdio-trace-output/trace-*.zip`：仅 `npm run e2e:trace` 生成，可用 `npx playwright show-trace <trace.zip>` 查看。
 7. 如果修改 `package.json` 里的命令、view/container id 或扩展 ID，必须同步更新 `test/e2e/support/extension-contract.mjs`。
-8. E2E 依赖两个未贡献到 UI 的内部命令：
+8. E2E 依赖以下未贡献到 UI 的内部命令：
    - `smartPageTranslator.internal.useDeterministicTranslator`：翻译 E2E 使用，避免依赖真实 Bing 网络结果。
    - `smartPageTranslator.internal.getLastAstOutline`：AST E2E 使用，读取最近一次 outline，避免 headless 剪贴板读取不稳定。
+   - `smartPageTranslator.internal.getRootFileQuickPathStorage`：根目录文件树 E2E 使用，确认快捷路径写入工作区状态而不是全局状态。
    这些命令是测试接缝；删除或改名必须同步更新 `test/e2e/support/extension-contract.mjs` 和相关 spec。
 9. 如果修改 UI、Notes、翻译、AST、终端、根目录文件树相关工作流，必须补充或更新对应 `test/e2e/specs/*.e2e.mjs`，并运行 `npm test`。
 10. E2E 中需要稳定验证 UI 时优先调用 `collectUiSnapshot(label)` 保存观察材料；难以稳定点击的 VS Code 状态优先通过 `browser.executeWorkbench()` 调用 VS Code API 断言。

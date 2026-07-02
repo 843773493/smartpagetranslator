@@ -42,6 +42,7 @@ export const COMMANDS = {
   // 改名或删除时必须同步根 AGENTS.md 和相关 spec。
   internal: {
     getLastAstOutline: 'smartPageTranslator.internal.getLastAstOutline',
+    getRootFileQuickPathStorage: 'smartPageTranslator.internal.getRootFileQuickPathStorage',
     useDeterministicTranslator: 'smartPageTranslator.internal.useDeterministicTranslator'
   },
   notes: {

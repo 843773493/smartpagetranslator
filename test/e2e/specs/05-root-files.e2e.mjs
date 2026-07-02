@@ -53,6 +53,26 @@ describe('Smart Page Translator root file tree E2E', () => {
     assert.match(snapshot.document.visibleText, /根目录文件树|ROOT FILES|Root/i);
 
     await executeCommandOnFile(COMMANDS.rootFiles.addQuickPath, sandboxDir);
+    const quickPathStorage = await browser.executeWorkbench(async (vscode, args) => {
+      const storage = await vscode.commands.executeCommand(args.storageCommand);
+      return {
+        storage,
+        expectedUri: vscode.Uri.file(args.sandboxDir).toString()
+      };
+    }, {
+      storageCommand: COMMANDS.internal.getRootFileQuickPathStorage,
+      sandboxDir
+    });
+    assert.ok(
+      quickPathStorage.storage.workspaceQuickPaths.includes(quickPathStorage.expectedUri),
+      'expected quick path to be stored in workspaceState'
+    );
+    assert.equal(
+      quickPathStorage.storage.globalQuickPaths.includes(quickPathStorage.expectedUri),
+      false,
+      'expected quick path not to be stored in globalState'
+    );
+
     await browser.executeWorkbench(
       (vscode, command) => vscode.commands.executeCommand(command),
       COMMANDS.rootFiles.refresh
