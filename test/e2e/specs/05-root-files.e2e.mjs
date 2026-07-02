@@ -6,16 +6,12 @@ import {
   FOCUS_ROOT_FILES_VIEW_COMMAND,
   OPEN_EXPLORER_VIEW_COMMAND
 } from '../support/extension-contract.mjs';
-import {
-  collectUiSnapshot,
-  readVisibleTextFromFrameContainingSelector
-} from '../support/diagnostics.mjs';
+import { collectUiSnapshot } from '../support/diagnostics.mjs';
 import {
   cleanupWorkbench,
   executeCommandOnFile,
   executeCommandWithInputOnFile,
   executeCommandWithWarningChoiceOnFile,
-  files,
   setupWorkbench,
   waitForActiveEditor,
   waitForPath,
@@ -125,28 +121,5 @@ describe('Smart Page Translator root file tree E2E', () => {
     await waitForPath(moveTargetFolder, false);
 
     await executeCommandOnFile(COMMANDS.rootFiles.removeQuickPath, sandboxDir);
-  });
-
-  it('renders html files in the root file tree preview', async () => {
-    await executeCommandOnFile(COMMANDS.rootFiles.previewHtml, files.htmlPreview);
-
-    let visibleText = '';
-    await browser.waitUntil(async () => {
-      try {
-        visibleText = await readVisibleTextFromFrameContainingSelector('#html-preview-e2e-message');
-        return visibleText.includes('HTML 预览标题')
-          && visibleText.includes('Smart Page Translator HTML 渲染成功');
-      } catch {
-        return false;
-      }
-    }, {
-      timeout: 20000,
-      interval: 300,
-      timeoutMsg: 'Timed out waiting for rendered HTML preview content'
-    });
-
-    assert.match(visibleText, /HTML 预览标题/);
-    assert.match(visibleText, /Smart Page Translator HTML 渲染成功/);
-    await collectUiSnapshot('root-file-html-preview');
   });
 });

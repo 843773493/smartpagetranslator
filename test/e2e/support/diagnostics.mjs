@@ -67,6 +67,22 @@ export async function readVisibleTextFromFrameContainingSelector(selector) {
   }
 }
 
+export async function clickSelectorInFrameContainingSelector(frameSelector, clickSelector) {
+  await switchToTopFrame();
+  const found = await switchToFrameContainingSelector(frameSelector);
+  if (!found) {
+    await switchToTopFrame();
+    throw new Error(`找不到包含 ${frameSelector} 的 frame`);
+  }
+
+  try {
+    const element = await $(clickSelector);
+    await element.click();
+  } finally {
+    await switchToTopFrame();
+  }
+}
+
 export async function dumpExtensionState() {
   return browser.executeWorkbench(async (vscode, extensionId) => {
     const extension = vscode.extensions.getExtension(extensionId);

@@ -6,3 +6,4 @@ test-fixtures
 test/e2e
 .wdio-vscode-cache
 wdio*.conf.mjs
+reference_repo

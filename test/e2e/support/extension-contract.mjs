@@ -6,12 +6,22 @@ export const ROOT_FILES_VIEW_ID = 'smart-page-translator-root-files';
 export const OPEN_NOTES_VIEW_COMMAND = `workbench.view.extension.${VIEW_CONTAINER_ID}`;
 export const OPEN_EXPLORER_VIEW_COMMAND = 'workbench.view.explorer';
 export const FOCUS_ROOT_FILES_VIEW_COMMAND = `${ROOT_FILES_VIEW_ID}.focus`;
+export const OPEN_WITH_COMMAND = 'vscode.openWith';
+
+export const CUSTOM_EDITORS = {
+  htmlPreview: 'smartPageTranslator.htmlPreview'
+};
 
 export const COMMANDS = {
   translate: 'smartPageTranslator.translate',
   extractAstOutline: 'smartPageTranslator.extractAstOutline',
   runWithTsx: 'smartPageTranslator.runWithTsx',
   runPytest: 'smartPageTranslator.runPytest',
+  browser: {
+    exportLogs: 'smartPageTranslator.browser.exportLogs',
+    openDevTools: 'smartPageTranslator.browser.openDevTools',
+    openUrl: 'smartPageTranslator.browser.openUrl'
+  },
   rootFiles: {
     addQuickPath: 'smartPageTranslator.rootFiles.addQuickPath',
     copy: 'smartPageTranslator.rootFiles.copy',
@@ -53,6 +63,9 @@ export const REQUIRED_COMMANDS = [
   COMMANDS.extractAstOutline,
   COMMANDS.runWithTsx,
   COMMANDS.runPytest,
+  COMMANDS.browser.exportLogs,
+  COMMANDS.browser.openDevTools,
+  COMMANDS.browser.openUrl,
   COMMANDS.rootFiles.addQuickPath,
   COMMANDS.rootFiles.copy,
   COMMANDS.rootFiles.copyPath,

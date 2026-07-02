@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -36,6 +36,10 @@
     "onCommand:smartPageTranslator.extractAstOutline",
     "onCommand:smartPageTranslator.runWithTsx",
     "onCommand:smartPageTranslator.runPytest",
+    "onCustomEditor:smartPageTranslator.htmlPreview",
+    "onCommand:smartPageTranslator.browser.openUrl",
+    "onCommand:smartPageTranslator.browser.exportLogs",
+    "onCommand:smartPageTranslator.browser.openDevTools",
     "onCommand:smartPageTranslator.rootFiles.refresh",
     "onCommand:smartPageTranslator.rootFiles.open",
     "onCommand:smartPageTranslator.rootFiles.previewHtml",
@@ -91,6 +95,24 @@
         "title": "预览 HTML",
         "category": "根目录文件树",
         "icon": "$(preview)"
+      },
+      {
+        "command": "smartPageTranslator.browser.openUrl",
+        "title": "打开网页",
+        "category": "集成浏览器",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "smartPageTranslator.browser.exportLogs",
+        "title": "复制浏览器日志",
+        "category": "集成浏览器",
+        "icon": "$(output)"
+      },
+      {
+        "command": "smartPageTranslator.browser.openDevTools",
+        "title": "打开浏览器开发人员工具",
+        "category": "集成浏览器",
+        "icon": "$(tools)"
       },
       {
         "command": "smartPageTranslator.rootFiles.newFile",
@@ -228,6 +250,21 @@
         "icon": "$(gear)"
       }
     ],
+    "customEditors": [
+      {
+        "viewType": "smartPageTranslator.htmlPreview",
+        "displayName": "Smart Page Translator HTML 预览",
+        "selector": [
+          {
+            "filenamePattern": "*.html"
+          },
+          {
+            "filenamePattern": "*.htm"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
     "submenus": [
       {
         "id": "smart.run",
@@ -260,12 +297,22 @@
     "menus": {
       "editor/title/context": [
         {
+          "command": "smartPageTranslator.rootFiles.previewHtml",
+          "group": "navigation@1",
+          "when": "resourceExtname =~ /\\.(html|htm)$/"
+        },
+        {
           "submenu": "smart.run",
           "group": "Python",
           "when": "resourceExtname =~ /\\.(ts|tsx|js|jsx|mts|cts|mjs|cjs|py)$/"
         }
       ],
       "editor/context": [
+        {
+          "command": "smartPageTranslator.rootFiles.previewHtml",
+          "group": "navigation@1",
+          "when": "editorTextFocus && resourceExtname =~ /\\.(html|htm)$/"
+        },
         {
           "submenu": "smart.run",
           "group": "Python",
@@ -288,6 +335,21 @@
         {
           "command": "smartPageTranslator.extractAstOutline",
           "when": "editorTextFocus && resourceExtname =~ /\\.(js|jsx|mjs|cjs|ts|tsx|py)$/"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "smartPageTranslator.rootFiles.previewHtml",
+          "when": "resourceExtname =~ /\\.(html|htm)$/"
+        },
+        {
+          "command": "smartPageTranslator.browser.openUrl"
+        },
+        {
+          "command": "smartPageTranslator.browser.exportLogs"
+        },
+        {
+          "command": "smartPageTranslator.browser.openDevTools"
         }
       ],
       "explorer/context": [
@@ -505,6 +567,21 @@
           "type": "string",
           "default": "md",
           "description": "新建笔记的默认扩展名"
+        },
+        "smartPageTranslator.browser.homepage": {
+          "type": "string",
+          "default": "https://example.com",
+          "description": "集成浏览器打开网页命令的默认 URL。"
+        },
+        "smartPageTranslator.browser.enablePageScripts": {
+          "type": "boolean",
+          "default": true,
+          "description": "预览本地 HTML 时是否执行页面自带脚本。关闭后仍会保留浏览器桥接脚本，用于日志和元素选择。"
+        },
+        "smartPageTranslator.browser.focusLockIndicator.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "集成浏览器 iframe 获得焦点时是否显示焦点锁定提示。"
         }
       }
     },
@@ -575,8 +652,8 @@
     "@wdio/devtools-service": "10.6.1",
     "@wdio/globals": "9.29.1",
     "@wdio/json-reporter": "9.29.1",
-    "@wdio/logger": "9.29.1",
     "@wdio/local-runner": "9.29.1",
+    "@wdio/logger": "9.29.1",
     "@wdio/mocha-framework": "9.29.1",
     "@wdio/protocols": "9.28.0",
     "@wdio/spec-reporter": "9.29.1",

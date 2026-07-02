@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { HtmlPreviewManager } from './htmlPreview';
+import { IntegratedBrowserManager } from '../browser/integratedBrowserManager';
 import { RootFileItem } from './rootFileItem';
 import { RootFileTreeProvider } from './rootFileTreeProvider';
 import { basenameOfUri, clipboardPathOfUri, displayPathOfUri, isHtmlUri, localRootUriOf, parentUriOf } from './rootFileUri';
@@ -19,10 +19,10 @@ const RENAME = '重命名';
 export function registerRootFileCommands(
 	context: vscode.ExtensionContext,
 	tree: RootFileTreeProvider,
-	treeView: vscode.TreeView<RootFileItem>
+	treeView: vscode.TreeView<RootFileItem>,
+	browser: IntegratedBrowserManager
 ): void {
 	let clipboard: RootFileClipboard | undefined;
-	const htmlPreview = new HtmlPreviewManager();
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.refresh', (target?: FileCommandTarget) => {
@@ -39,7 +39,7 @@ export function registerRootFileCommands(
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.previewHtml', async (target?: FileCommandTarget) => {
-			await previewHtmlFile(target || selectedTreeItem(treeView), htmlPreview);
+			await previewHtmlFile(target || selectedTreeItem(treeView) || vscode.window.activeTextEditor?.document.uri, browser);
 		})
 	);
 
@@ -164,7 +164,7 @@ async function openFile(target?: FileCommandTarget): Promise<void> {
 	await vscode.window.showTextDocument(document);
 }
 
-async function previewHtmlFile(target: FileCommandTarget, htmlPreview: HtmlPreviewManager): Promise<void> {
+async function previewHtmlFile(target: FileCommandTarget, browser: IntegratedBrowserManager): Promise<void> {
 	try {
 		const uri = requireUri(target);
 		const stat = await vscode.workspace.fs.stat(uri);
@@ -178,7 +178,7 @@ async function previewHtmlFile(target: FileCommandTarget, htmlPreview: HtmlPrevi
 			return;
 		}
 
-		await htmlPreview.open(uri);
+		await browser.openHtmlFile(uri);
 	} catch (err) {
 		await showFileOperationError('预览 HTML 失败', err);
 	}

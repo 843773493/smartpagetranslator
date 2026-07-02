@@ -1,4 +1,9 @@
 import * as vscode from 'vscode';
+import {
+    IntegratedBrowserManager,
+    registerHtmlPreviewEditorProvider,
+    registerIntegratedBrowserCommands
+} from './browser/integratedBrowserManager';
 import { registerAstOutlineCommand } from './commands/astOutline';
 import { registerRunPytestCommand } from './commands/runPytest';
 import { registerRunWithTsxCommand } from './commands/runWithTsx';
@@ -29,6 +34,12 @@ export function activate(context: vscode.ExtensionContext) {
     registerRunPytestCommand(context, logFn);
     logFn('Extension', 'registerRunPytestCommand DONE');
 
+    const browserManager = new IntegratedBrowserManager(context);
+    context.subscriptions.push(browserManager);
+    registerIntegratedBrowserCommands(context, browserManager);
+    registerHtmlPreviewEditorProvider(context, browserManager);
+    logFn('Extension', 'IntegratedBrowserManager registered DONE');
+
     const rootFileTree = new RootFileTreeProvider({
         remoteName: vscode.env.remoteName,
         extensionKind: context.extension.extensionKind
@@ -38,7 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
         showCollapseAll: true
     });
     context.subscriptions.push(rootFileTreeView);
-    registerRootFileCommands(context, rootFileTree, rootFileTreeView);
+    registerRootFileCommands(context, rootFileTree, rootFileTreeView, browserManager);
     logFn('Extension', 'RootFileTreeProvider registered DONE');
 
     let notesTree: NotesViewProvider | undefined;
