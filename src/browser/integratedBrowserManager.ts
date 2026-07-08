@@ -4,7 +4,8 @@ import * as vscode from 'vscode';
 import { basenameOfUri, displayPathOfUri, isHtmlUri, parentUriOf } from '../files/rootFileUri';
 
 const HTML_PREVIEW_EDITOR_VIEW_TYPE = 'smartPageTranslator.htmlPreview';
-const BROWSER_VIEW_TYPE = HTML_PREVIEW_EDITOR_VIEW_TYPE;
+const BROWSER_VIEW_TYPE = 'smartPageTranslator.browser';
+const STANDALONE_BROWSER_KEY = 'standalone-browser';
 const CONFIG_SECTION = 'smartPageTranslator.browser';
 
 type BrowserMode = 'html' | 'url';
@@ -46,6 +47,8 @@ type WebviewToExtensionMessage =
 	| { readonly type: 'log'; readonly entry: BrowserLogEntry }
 	| { readonly type: 'selectedElement'; readonly element: ElementSnapshot }
 	| { readonly type: 'exportLogs' }
+	| { readonly type: 'navigated'; readonly url: string }
+	| { readonly type: 'navigateToUrl'; readonly url: string }
 	| { readonly type: 'openExternal'; readonly url: string }
 	| { readonly type: 'openDevTools' }
 	| { readonly type: 'status'; readonly message: string; readonly severity?: 'info' | 'warning' | 'error' };
@@ -61,6 +64,20 @@ type BrowserRenderSettings = {
 	readonly baseHref: string;
 	readonly enablePageScripts: boolean;
 	readonly focusLockEnabled: boolean;
+};
+
+type BrowserDebugPanelState = {
+	readonly key: string;
+	readonly title: string;
+	readonly mode: BrowserMode;
+	readonly url: string;
+	readonly visible: boolean;
+	readonly active: boolean;
+};
+
+type BrowserDebugState = {
+	readonly active?: BrowserDebugPanelState;
+	readonly panels: readonly BrowserDebugPanelState[];
 };
 
 export class IntegratedBrowserManager implements vscode.Disposable {
@@ -101,11 +118,13 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		}
 
 		const normalized = normalizeBrowserUrl(url);
+		const html = await fetchBrowserUrlHtml(normalized);
 		this.open({
-			key: normalized,
+			key: STANDALONE_BROWSER_KEY,
 			title: `浏览 ${normalized}`,
 			mode: 'url',
-			url: normalized
+			url: normalized,
+			html
 		});
 	}
 
@@ -117,6 +136,18 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 	public async openDevTools(): Promise<void> {
 		const view = this.requireActiveView();
 		await view.openDevTools();
+	}
+
+	public getDebugState(): BrowserDebugState {
+		const panels = Array.from(this.panels.entries()).map(([key, view]) => view.getDebugState(key));
+		return {
+			active: this.activeView ? this.activeView.getDebugState(findPanelKey(this.panels, this.activeView) || '') : undefined,
+			panels
+		};
+	}
+
+	public closeStandaloneBrowser(): void {
+		this.panels.get(STANDALONE_BROWSER_KEY)?.dispose();
 	}
 
 	public attachHtmlPreviewEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
@@ -236,6 +267,18 @@ export function registerIntegratedBrowserCommands(
 			await browser.openDevTools();
 		})
 	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.internal.getBrowserState', () => {
+			return browser.getDebugState();
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.internal.closeStandaloneBrowser', () => {
+			browser.closeStandaloneBrowser();
+		})
+	);
 }
 
 function resolveWebviewOptions(
@@ -252,6 +295,18 @@ function resolveWebviewOptions(
 	};
 }
 
+function findPanelKey(
+	panels: ReadonlyMap<string, IntegratedBrowserView>,
+	target: IntegratedBrowserView
+): string | undefined {
+	for (const [key, view] of panels.entries()) {
+		if (view === target) {
+			return key;
+		}
+	}
+	return undefined;
+}
+
 class IntegratedBrowserView implements vscode.Disposable {
 	private readonly onDisposeEmitter = new vscode.EventEmitter<void>();
 	public readonly onDispose = this.onDisposeEmitter.event;
@@ -262,10 +317,11 @@ class IntegratedBrowserView implements vscode.Disposable {
 	private readonly logs: BrowserLogEntry[] = [];
 	private selectedElement: ElementSnapshot | undefined;
 	private disposed = false;
+	private currentInput: BrowserInput;
 
 	public static create(context: vscode.ExtensionContext, input: BrowserInput): IntegratedBrowserView {
 		const panel = vscode.window.createWebviewPanel(
-			BROWSER_VIEW_TYPE,
+			input.mode === 'url' ? BROWSER_VIEW_TYPE : HTML_PREVIEW_EDITOR_VIEW_TYPE,
 			input.title,
 			vscode.ViewColumn.Active,
 			{
@@ -291,6 +347,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 		input: BrowserInput,
 		private readonly revealOnShow: boolean
 	) {
+		this.currentInput = input;
 		this.panel.onDidDispose(() => this.dispose());
 		this.panel.onDidChangeViewState(event => {
 			if (event.webviewPanel.active) {
@@ -315,6 +372,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 	}
 
 	public show(input: BrowserInput): void {
+		this.currentInput = input;
 		this.panel.title = input.title;
 		this.panel.webview.options = resolveWebviewOptions(this.context, input);
 		this.panel.webview.html = this.renderHtml(input);
@@ -339,6 +397,17 @@ class IntegratedBrowserView implements vscode.Disposable {
 		}
 	}
 
+	public getDebugState(key: string): BrowserDebugPanelState {
+		return {
+			key,
+			title: this.panel.title,
+			mode: this.currentInput.mode,
+			url: this.currentInput.url,
+			visible: this.panel.visible,
+			active: this.panel.active
+		};
+	}
+
 	private async handleMessage(message: unknown): Promise<void> {
 		if (!isWebviewToExtensionMessage(message)) {
 			return;
@@ -360,6 +429,18 @@ class IntegratedBrowserView implements vscode.Disposable {
 			case 'exportLogs':
 				await this.exportLogs();
 				break;
+			case 'navigated':
+				this.panel.title = `浏览 ${message.url}`;
+				this.currentInput = {
+					...this.currentInput,
+					title: this.panel.title,
+					mode: 'url',
+					url: message.url
+				};
+				break;
+			case 'navigateToUrl':
+				await this.navigateToUrl(message.url);
+				break;
 			case 'openExternal':
 				await vscode.env.openExternal(vscode.Uri.parse(message.url));
 				break;
@@ -377,6 +458,18 @@ class IntegratedBrowserView implements vscode.Disposable {
 		this.showToast('元素内容已复制到剪贴板。');
 	}
 
+	private async navigateToUrl(rawUrl: string): Promise<void> {
+		const normalized = normalizeBrowserUrl(rawUrl);
+		const html = await fetchBrowserUrlHtml(normalized);
+		this.show({
+			...this.currentInput,
+			title: `浏览 ${normalized}`,
+			mode: 'url',
+			url: normalized,
+			html
+		});
+	}
+
 	private showToast(message: string, severity: 'info' | 'warning' | 'error' = 'info'): void {
 		void this.panel.webview.postMessage({ type: 'showToast', message, severity } satisfies ExtensionToWebviewMessage);
 	}
@@ -391,7 +484,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 			html: input.html || '',
 			baseHref: input.sourceUri
 				? ensureTrailingSlash(this.panel.webview.asWebviewUri(parentUriOf(vscode.Uri.parse(input.sourceUri))).toString())
-				: '',
+				: input.mode === 'url' ? input.url : '',
 			enablePageScripts: configuration.get<boolean>('enablePageScripts', true),
 			focusLockEnabled: configuration.get<boolean>('focusLockIndicator.enabled', true)
 		};
@@ -411,6 +504,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 			`connect-src *`
 		].join('; ');
 
+		const initialFrameSource = input.html ? '' : ` src="${escapeAttribute(input.url)}"`;
 		return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -438,7 +532,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 	</header>
 	<section class="browser-info" id="browser-info" aria-live="polite" hidden></section>
 	<main class="browser-content">
-		<iframe id="browser-frame" title="集成浏览器页面"></iframe>
+		<iframe id="browser-frame" title="集成浏览器页面"${initialFrameSource}></iframe>
 	</main>
 	<script nonce="${nonce}">${getWebviewScript()}</script>
 </body>
@@ -455,6 +549,73 @@ function normalizeBrowserUrl(value: string): string {
 		return `http://${trimmed}`;
 	}
 	return `https://${trimmed}`;
+}
+
+async function fetchBrowserUrlHtml(url: string): Promise<string | undefined> {
+	if (!/^https?:/i.test(url)) {
+		return undefined;
+	}
+
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 10000);
+	try {
+		const response = await fetch(url, {
+			redirect: 'follow',
+			signal: controller.signal,
+			headers: {
+				'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+				'user-agent': 'Smart Page Translator VS Code Browser'
+			}
+		});
+		const contentType = response.headers.get('content-type') || '';
+		if (!isRenderableContentType(contentType)) {
+			return renderRemoteMessagePage(
+				url,
+				`无法内嵌显示 ${contentType || 'unknown'} 内容`,
+				`HTTP ${response.status} ${response.statusText}`.trim()
+			);
+		}
+
+		const text = await response.text();
+		if (!response.ok) {
+			return renderRemoteMessagePage(
+				url,
+				`页面返回 HTTP ${response.status}`,
+				response.statusText || text.slice(0, 300)
+			);
+		}
+		return text;
+	} catch (error) {
+		return renderRemoteMessagePage(url, '网页加载失败', formatUnknownError(error));
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
+function isRenderableContentType(contentType: string): boolean {
+	return !contentType
+		|| /^text\/html\b/i.test(contentType)
+		|| /^application\/xhtml\+xml\b/i.test(contentType)
+		|| /^text\/plain\b/i.test(contentType);
+}
+
+function renderRemoteMessagePage(url: string, title: string, detail: string): string {
+	return `<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<title>${escapeHtml(title)}</title>
+</head>
+<body>
+	<h1>${escapeHtml(title)}</h1>
+	<p>${escapeHtml(detail)}</p>
+	<p><a href="${escapeAttribute(url)}">${escapeHtml(url)}</a></p>
+</body>
+</html>`;
+}
+
+function formatUnknownError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function ensureTrailingSlash(value: string): string {
@@ -546,6 +707,8 @@ function isWebviewToExtensionMessage(value: unknown): value is WebviewToExtensio
 		|| type === 'log'
 		|| type === 'selectedElement'
 		|| type === 'exportLogs'
+		|| type === 'navigated'
+		|| type === 'navigateToUrl'
 		|| type === 'openExternal'
 		|| type === 'openDevTools'
 		|| type === 'status';
@@ -1022,12 +1185,22 @@ window.addEventListener('message', event => {
 	}
 });
 
-input.addEventListener('change', () => {
-	currentUrl = input.value;
+input.addEventListener('change', navigateToInputValue);
+input.addEventListener('keydown', event => {
+	if (event.key === 'Enter') {
+		event.preventDefault();
+		navigateToInputValue();
+		input.blur();
+	}
+});
+function navigateToInputValue() {
+	currentUrl = normalizeUrl(input.value);
 	settings.mode = 'url';
 	settings.url = currentUrl;
-	renderCurrentInput();
-});
+	input.value = currentUrl;
+	document.title = '浏览 ' + currentUrl;
+	vscode.postMessage({ type: 'navigateToUrl', url: currentUrl });
+}
 backButton.addEventListener('click', () => navigateHistory(-1));
 forwardButton.addEventListener('click', () => navigateHistory(1));
 reloadButton.addEventListener('click', () => renderCurrentInput());
@@ -1050,8 +1223,19 @@ function renderCurrentInput() {
 	const normalized = normalizeUrl(currentUrl);
 	currentUrl = normalized;
 	input.value = normalized;
+	document.title = '浏览 ' + normalized;
+	vscode.postMessage({ type: 'navigated', url: normalized });
+	if (settings.html) {
+		frame.removeAttribute('src');
+		frame.srcdoc = buildInstrumentedHtml(stripContentSecurityPolicyMeta(settings.html || ''));
+		return;
+	}
 	frame.removeAttribute('srcdoc');
 	frame.src = normalized;
+}
+
+function stripContentSecurityPolicyMeta(source) {
+	return String(source || '').replace(/<meta\\b[^>]*http-equiv=(["'])content-security-policy\\1[^>]*>/gi, '');
 }
 
 function normalizeUrl(value) {

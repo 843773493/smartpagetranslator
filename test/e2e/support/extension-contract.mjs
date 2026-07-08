@@ -41,6 +41,8 @@ export const COMMANDS = {
   // 仅供 E2E 使用的测试接缝，不注册到 package.json 的 UI commands。
   // 改名或删除时必须同步根 AGENTS.md 和相关 spec。
   internal: {
+    closeStandaloneBrowser: 'smartPageTranslator.internal.closeStandaloneBrowser',
+    getBrowserState: 'smartPageTranslator.internal.getBrowserState',
     getLastAstOutline: 'smartPageTranslator.internal.getLastAstOutline',
     getRootFileQuickPathStorage: 'smartPageTranslator.internal.getRootFileQuickPathStorage',
     useDeterministicTranslator: 'smartPageTranslator.internal.useDeterministicTranslator'

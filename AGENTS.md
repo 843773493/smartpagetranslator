@@ -99,6 +99,8 @@ npm run artifacts:latest
    - `smartPageTranslator.internal.useDeterministicTranslator`：翻译 E2E 使用，避免依赖真实 Bing 网络结果。
    - `smartPageTranslator.internal.getLastAstOutline`：AST E2E 使用，读取最近一次 outline，避免 headless 剪贴板读取不稳定。
    - `smartPageTranslator.internal.getRootFileQuickPathStorage`：根目录文件树 E2E 使用，确认快捷路径写入工作区状态而不是全局状态。
+   - `smartPageTranslator.internal.getBrowserState`：集成浏览器 E2E 使用，读取 Webview 管理器状态，避免不同 VS Code 版本的 Webview frame DOM 差异导致断言不稳定。
+   - `smartPageTranslator.internal.closeStandaloneBrowser`：集成浏览器 E2E 清理使用，关闭独立浏览器 Webview，避免后续 Webview 用例复用错误 frame。
    这些命令是测试接缝；删除或改名必须同步更新 `test/e2e/support/extension-contract.mjs` 和相关 spec。
 9. 如果修改 UI、Notes、翻译、AST、终端、根目录文件树相关工作流，必须补充或更新对应 `test/e2e/specs/*.e2e.mjs`，并运行 `npm test`。
 10. E2E 中需要稳定验证 UI 时优先调用 `collectUiSnapshot(label)` 保存观察材料；难以稳定点击的 VS Code 状态优先通过 `browser.executeWorkbench()` 调用 VS Code API 断言。
