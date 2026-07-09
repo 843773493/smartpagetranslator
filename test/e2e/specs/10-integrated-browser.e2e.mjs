@@ -54,14 +54,21 @@ describe('Smart Page Translator integrated browser E2E', () => {
       const firstState = await waitForBrowserState(firstUrl);
       assert.equal(firstState.active?.url, firstUrl);
       assert.equal(browserUrlPanels(firstState).length, 1);
-      await waitForServerRequest(server, '/first');
+      await waitForServerRequest(server, request => request.pathname === '/first', '/first document');
+      await waitForServerRequest(server, request => request.pathname === '/@vite/client', '/@vite/client module');
+      await waitForServerRequest(server, request => (
+        request.pathname === '/script-executed' && request.searchParams.get('from') === '/first'
+      ), 'module script execution for /first');
 
       const secondUrl = `${server.origin}/second`;
       await executeCommandWithInput(COMMANDS.browser.openUrl, secondUrl);
       const secondState = await waitForBrowserState(secondUrl);
       assert.equal(secondState.active?.url, secondUrl);
       assert.equal(browserUrlPanels(secondState).length, 1);
-      await waitForServerRequest(server, '/second');
+      await waitForServerRequest(server, request => request.pathname === '/second', '/second document');
+      await waitForServerRequest(server, request => (
+        request.pathname === '/script-executed' && request.searchParams.get('from') === '/second'
+      ), 'module script execution for /second');
     } finally {
       await server.close();
       await closeStandaloneBrowser();
@@ -72,8 +79,37 @@ describe('Smart Page Translator integrated browser E2E', () => {
 async function startHttpFixtureServer() {
   const requests = [];
   const server = http.createServer((request, response) => {
-    const route = request.url?.replace(/^\//, '') || 'root';
-    requests.push(request.url || '/');
+    const url = new URL(request.url || '/', 'http://127.0.0.1');
+    requests.push(url);
+
+    if (url.pathname === '/@vite/client') {
+      response.writeHead(200, {
+        'content-type': 'text/javascript; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end('window.__smartPageTranslatorViteClientLoaded = true;');
+      return;
+    }
+
+    if (url.pathname === '/src/main.tsx') {
+      response.writeHead(200, {
+        'content-type': 'text/javascript; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end(`
+        document.body.dataset.smartPageTranslatorModule = 'executed';
+        fetch('/script-executed?from=' + encodeURIComponent(location.pathname), { cache: 'no-store' });
+      `);
+      return;
+    }
+
+    if (url.pathname === '/script-executed') {
+      response.writeHead(204, { 'cache-control': 'no-store' });
+      response.end();
+      return;
+    }
+
+    const route = url.pathname.replace(/^\//, '') || 'root';
     response.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store'
@@ -83,6 +119,8 @@ async function startHttpFixtureServer() {
 <head><meta charset="utf-8"><title>HTTP fixture ${route}</title></head>
 <body>
   <h1 id="browser-http-e2e-message">HTTP fixture ${route}</h1>
+  <script type="module" src="/@vite/client"></script>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>`);
   });
@@ -141,14 +179,18 @@ async function closeStandaloneBrowser() {
   ), COMMANDS.internal.closeStandaloneBrowser);
 }
 
-async function waitForServerRequest(server, pathname) {
-  await browser.waitUntil(() => server.requests.includes(pathname), {
+async function waitForServerRequest(server, predicate, label) {
+  await browser.waitUntil(() => server.requests.some(predicate), {
     timeout: 20000,
     interval: 200,
-    timeoutMsg: `Timed out waiting for HTTP fixture request ${pathname}; received ${server.requests.join(', ')}`
+    timeoutMsg: `Timed out waiting for HTTP fixture request ${label}; received ${server.requests.map(formatRequest).join(', ')}`
   });
 }
 
 function browserUrlPanels(state) {
   return state.panels.filter((panel) => panel.key === 'standalone-browser');
+}
+
+function formatRequest(request) {
+  return `${request.pathname}${request.search}`;
 }

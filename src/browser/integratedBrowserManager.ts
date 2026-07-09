@@ -118,13 +118,11 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		}
 
 		const normalized = normalizeBrowserUrl(url);
-		const html = await fetchBrowserUrlHtml(normalized);
 		this.open({
 			key: STANDALONE_BROWSER_KEY,
 			title: `浏览 ${normalized}`,
 			mode: 'url',
-			url: normalized,
-			html
+			url: normalized
 		});
 	}
 
@@ -460,13 +458,12 @@ class IntegratedBrowserView implements vscode.Disposable {
 
 	private async navigateToUrl(rawUrl: string): Promise<void> {
 		const normalized = normalizeBrowserUrl(rawUrl);
-		const html = await fetchBrowserUrlHtml(normalized);
 		this.show({
 			...this.currentInput,
 			title: `浏览 ${normalized}`,
 			mode: 'url',
 			url: normalized,
-			html
+			html: undefined
 		});
 	}
 
@@ -484,7 +481,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 			html: input.html || '',
 			baseHref: input.sourceUri
 				? ensureTrailingSlash(this.panel.webview.asWebviewUri(parentUriOf(vscode.Uri.parse(input.sourceUri))).toString())
-				: input.mode === 'url' ? input.url : '',
+				: '',
 			enablePageScripts: configuration.get<boolean>('enablePageScripts', true),
 			focusLockEnabled: configuration.get<boolean>('focusLockIndicator.enabled', true)
 		};
@@ -549,73 +546,6 @@ function normalizeBrowserUrl(value: string): string {
 		return `http://${trimmed}`;
 	}
 	return `https://${trimmed}`;
-}
-
-async function fetchBrowserUrlHtml(url: string): Promise<string | undefined> {
-	if (!/^https?:/i.test(url)) {
-		return undefined;
-	}
-
-	const controller = new AbortController();
-	const timeout = setTimeout(() => controller.abort(), 10000);
-	try {
-		const response = await fetch(url, {
-			redirect: 'follow',
-			signal: controller.signal,
-			headers: {
-				'accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
-				'user-agent': 'Smart Page Translator VS Code Browser'
-			}
-		});
-		const contentType = response.headers.get('content-type') || '';
-		if (!isRenderableContentType(contentType)) {
-			return renderRemoteMessagePage(
-				url,
-				`无法内嵌显示 ${contentType || 'unknown'} 内容`,
-				`HTTP ${response.status} ${response.statusText}`.trim()
-			);
-		}
-
-		const text = await response.text();
-		if (!response.ok) {
-			return renderRemoteMessagePage(
-				url,
-				`页面返回 HTTP ${response.status}`,
-				response.statusText || text.slice(0, 300)
-			);
-		}
-		return text;
-	} catch (error) {
-		return renderRemoteMessagePage(url, '网页加载失败', formatUnknownError(error));
-	} finally {
-		clearTimeout(timeout);
-	}
-}
-
-function isRenderableContentType(contentType: string): boolean {
-	return !contentType
-		|| /^text\/html\b/i.test(contentType)
-		|| /^application\/xhtml\+xml\b/i.test(contentType)
-		|| /^text\/plain\b/i.test(contentType);
-}
-
-function renderRemoteMessagePage(url: string, title: string, detail: string): string {
-	return `<!doctype html>
-<html lang="zh-CN">
-<head>
-	<meta charset="utf-8">
-	<title>${escapeHtml(title)}</title>
-</head>
-<body>
-	<h1>${escapeHtml(title)}</h1>
-	<p>${escapeHtml(detail)}</p>
-	<p><a href="${escapeAttribute(url)}">${escapeHtml(url)}</a></p>
-</body>
-</html>`;
-}
-
-function formatUnknownError(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
 }
 
 function ensureTrailingSlash(value: string): string {
@@ -1225,17 +1155,8 @@ function renderCurrentInput() {
 	input.value = normalized;
 	document.title = '浏览 ' + normalized;
 	vscode.postMessage({ type: 'navigated', url: normalized });
-	if (settings.html) {
-		frame.removeAttribute('src');
-		frame.srcdoc = buildInstrumentedHtml(stripContentSecurityPolicyMeta(settings.html || ''));
-		return;
-	}
 	frame.removeAttribute('srcdoc');
 	frame.src = normalized;
-}
-
-function stripContentSecurityPolicyMeta(source) {
-	return String(source || '').replace(/<meta\\b[^>]*http-equiv=(["'])content-security-policy\\1[^>]*>/gi, '');
 }
 
 function normalizeUrl(value) {
