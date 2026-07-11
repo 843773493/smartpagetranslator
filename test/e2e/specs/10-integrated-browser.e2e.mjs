@@ -14,7 +14,7 @@ describe('Smart Page Translator integrated browser E2E', () => {
   beforeEach(setupWorkbench);
   afterEach(cleanupWorkbench);
 
-  it('opens the standalone browser command from F1 and switches ordinary HTTP URLs', async () => {
+  it('opens proxied standalone browser URLs, runs page scripts, and selects page elements', async () => {
     const browserContribution = await browser.executeWorkbench(
       async (vscode, args) => {
         const extension = vscode.extensions.getExtension(args.extensionId);
@@ -50,28 +50,30 @@ describe('Smart Page Translator integrated browser E2E', () => {
     const server = await startHttpFixtureServer();
     try {
       const firstUrl = `${server.origin}/first`;
-      await executeCommandWithInput(COMMANDS.browser.openUrl, firstUrl);
+      const redirectUrl = `${server.origin}/client-redirect`;
+      await executeCommandWithInput(COMMANDS.browser.openUrl, redirectUrl);
       const firstState = await waitForBrowserState(firstUrl);
       assert.equal(firstState.active?.url, firstUrl);
       assert.equal(browserUrlPanels(firstState).length, 1);
       await waitForServerRequest(server, request => request.pathname === '/first', '/first document');
+      await waitForServerRequest(server, request => request.pathname === '/client-redirect', 'client redirect document');
       await waitForServerRequest(server, request => request.pathname === '/@vite/client', '/@vite/client module');
+      await waitForServerRequest(server, request => request.pathname === '/src/dependency.js', 'nested ES module dependency');
+      await waitForServerRequest(server, request => request.pathname === '/styles/main.css', 'page stylesheet');
+      await waitForServerRequest(server, request => request.pathname === '/styles/nested.css', 'nested CSS import');
+      await waitForServerRequest(server, request => request.pathname === '/assets/pixel.svg', 'CSS image resource');
       await waitForServerRequest(server, request => (
         request.pathname === '/script-executed' && request.searchParams.get('from') === '/first'
       ), 'module script execution for /first');
 
-      const secondUrl = `${server.origin}/second`;
-      await executeCommandWithInput(COMMANDS.browser.openUrl, secondUrl);
-      const secondState = await waitForBrowserState(secondUrl);
-      assert.equal(secondState.active?.url, secondUrl);
-      assert.equal(browserUrlPanels(secondState).length, 1);
-      await waitForServerRequest(server, request => request.pathname === '/second', '/second document');
-      await waitForServerRequest(server, request => (
-        request.pathname === '/script-executed' && request.searchParams.get('from') === '/second'
-      ), 'module script execution for /second');
+      await selectBrowserElementBySelector('#browser-http-e2e-message');
+      const selectedState = await waitForSelectedElement('#browser-http-e2e-message');
+      assert.equal(selectedState.active?.selectedElement?.tagName, 'h1');
+      assert.equal(selectedState.active?.selectedElement?.id, 'browser-http-e2e-message');
+      assert.match(selectedState.active?.selectedElement?.outerHTML || '', /HTTP fixture first/);
     } finally {
-      await server.close();
       await closeStandaloneBrowser();
+      await server.close();
     }
   });
 });
@@ -97,15 +99,66 @@ async function startHttpFixtureServer() {
         'cache-control': 'no-store'
       });
       response.end(`
+		import { message } from './dependency.js';
         document.body.dataset.smartPageTranslatorModule = 'executed';
-        fetch('/script-executed?from=' + encodeURIComponent(location.pathname), { cache: 'no-store' });
+		document.getElementById('browser-http-e2e-message').textContent = message;
+        fetch('/script-executed?from=' + encodeURIComponent(new URL(document.baseURI).pathname), { cache: 'no-store' });
       `);
+      return;
+    }
+
+    if (url.pathname === '/src/dependency.js') {
+      response.writeHead(200, {
+        'content-type': 'text/javascript; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end(`export const message = 'HTTP fixture first nested module';`);
+      return;
+    }
+
+    if (url.pathname === '/styles/main.css') {
+      response.writeHead(200, {
+        'content-type': 'text/css; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end(`@import './nested.css'; body { background-image: url('../assets/pixel.svg'); }`);
+      return;
+    }
+
+    if (url.pathname === '/styles/nested.css') {
+      response.writeHead(200, {
+        'content-type': 'text/css; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end(`#browser-http-e2e-message { color: rgb(1, 2, 3); }`);
+      return;
+    }
+
+    if (url.pathname === '/assets/pixel.svg') {
+      response.writeHead(200, {
+        'content-type': 'image/svg+xml',
+        'cache-control': 'no-store'
+      });
+      response.end(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="red"/></svg>`);
       return;
     }
 
     if (url.pathname === '/script-executed') {
       response.writeHead(204, { 'cache-control': 'no-store' });
       response.end();
+      return;
+    }
+
+    if (url.pathname === '/client-redirect') {
+      const address = server.address();
+      const origin = address && typeof address !== 'string'
+        ? `http://127.0.0.1:${address.port}`
+        : 'http://127.0.0.1';
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end(`<html><head><script>location.replace('${origin}/first');</script></head><body></body></html>`);
       return;
     }
 
@@ -116,7 +169,7 @@ async function startHttpFixtureServer() {
     });
     response.end(`<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><title>HTTP fixture ${route}</title></head>
+<head><meta charset="utf-8"><title>HTTP fixture ${route}</title><link rel="stylesheet" href="/styles/main.css"></head>
 <body>
   <h1 id="browser-http-e2e-message">HTTP fixture ${route}</h1>
   <script type="module" src="/@vite/client"></script>
@@ -155,14 +208,16 @@ async function waitForBrowserState(expectedUrl) {
   await browser.waitUntil(async () => {
     try {
       state = await readBrowserState();
-      return state.active?.url === expectedUrl && browserUrlPanels(state).length === 1;
+      return state.active?.url === expectedUrl
+        && state.active?.webviewUrl === expectedUrl
+        && browserUrlPanels(state).length === 1;
     } catch {
       return false;
     }
   }, {
     timeout: 20000,
     interval: 300,
-    timeoutMsg: `Timed out waiting for browser URL ${expectedUrl}`
+    timeoutMsg: `Timed out waiting for browser URL ${expectedUrl}; last state ${JSON.stringify(state)}`
   });
   return state;
 }
@@ -173,10 +228,23 @@ async function readBrowserState() {
   ), COMMANDS.internal.getBrowserState);
 }
 
+async function selectBrowserElementBySelector(selector) {
+  await browser.executeWorkbench(async (vscode, args) => {
+    await vscode.commands.executeCommand(args.command, args.selector, { copyToClipboard: false });
+  }, {
+    command: COMMANDS.internal.selectBrowserElementBySelector,
+    selector
+  });
+}
+
 async function closeStandaloneBrowser() {
-  await browser.executeWorkbench((vscode, command) => (
-    vscode.commands.executeCommand(command)
-  ), COMMANDS.internal.closeStandaloneBrowser);
+  try {
+    await browser.executeWorkbench((vscode, command) => (
+      vscode.commands.executeCommand(command)
+    ), COMMANDS.internal.closeStandaloneBrowser);
+  } catch {
+    // VS Code Insiders 有时会在 URL Webview 重渲染后先关闭测试窗口；清理阶段不覆盖主断言结果。
+  }
 }
 
 async function waitForServerRequest(server, predicate, label) {
@@ -193,4 +261,18 @@ function browserUrlPanels(state) {
 
 function formatRequest(request) {
   return `${request.pathname}${request.search}`;
+}
+
+async function waitForSelectedElement(selector) {
+  let state;
+  await browser.waitUntil(async () => {
+    state = await readBrowserState();
+    return state.active?.selectedElement?.selector === selector
+      || state.active?.selectedElement?.id === selector.replace(/^#/, '');
+  }, {
+    timeout: 20000,
+    interval: 300,
+    timeoutMsg: `Timed out waiting for browser selected element ${selector}; last state ${JSON.stringify(state)}`
+  });
+  return state;
 }

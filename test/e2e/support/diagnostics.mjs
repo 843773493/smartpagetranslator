@@ -482,7 +482,7 @@ export async function captureDiagnostics(label, error) {
 }
 
 async function switchToFrameContainingSelector(selector, depth = 0) {
-  if (await $(selector).isExisting()) {
+  if (await selectorExists(selector)) {
     return true;
   }
 
@@ -490,16 +490,45 @@ async function switchToFrameContainingSelector(selector, depth = 0) {
     return false;
   }
 
-  const frames = await $$('iframe');
+  const frames = await findIframes();
   for (const frame of frames) {
-    await browser.switchToFrame(frame);
-    if (await switchToFrameContainingSelector(selector, depth + 1)) {
-      return true;
+    let foundInFrame = false;
+    try {
+      await browser.switchToFrame(frame);
+      foundInFrame = await switchToFrameContainingSelector(selector, depth + 1);
+      if (foundInFrame) {
+        return true;
+      }
+    } catch {
+      // Some VS Code workbench iframes are transient or not queryable through WebDriver.
+    } finally {
+      if (!foundInFrame) {
+        try {
+          await browser.switchToParentFrame();
+        } catch {
+          await switchToTopFrame();
+        }
+      }
     }
-    await browser.switchToParentFrame();
   }
 
   return false;
+}
+
+async function selectorExists(selector) {
+  try {
+    return await $(selector).isExisting();
+  } catch {
+    return false;
+  }
+}
+
+async function findIframes() {
+  try {
+    return await $$('iframe');
+  } catch {
+    return [];
+  }
 }
 
 export function safeValue(value, seen = new WeakSet()) {

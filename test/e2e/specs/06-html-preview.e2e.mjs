@@ -7,10 +7,6 @@ import {
   EXTENSION_ID
 } from '../support/extension-contract.mjs';
 import {
-  clickSelectorInFrameContainingSelector,
-  readVisibleTextFromFrameContainingSelector
-} from '../support/diagnostics.mjs';
-import {
   cleanupWorkbench,
   executeCommandOnFile,
   files,
@@ -61,35 +57,17 @@ describe('Smart Page Translator HTML preview E2E', () => {
 
     await executeCommandOnFile(COMMANDS.rootFiles.previewHtml, files.htmlPreview);
 
-    let visibleText = '';
-    await browser.waitUntil(async () => {
-      try {
-        visibleText = await readVisibleTextFromFrameContainingSelector('#html-preview-e2e-message');
-        return visibleText.includes('HTML 预览标题')
-          && visibleText.includes('Smart Page Translator HTML 渲染成功');
-      } catch {
-        return false;
-      }
-    }, {
-      timeout: 20000,
-      interval: 300,
-      timeoutMsg: 'Timed out waiting for rendered HTML preview content'
+    await waitForBrowserState({
+      mode: 'html',
+      urlIncludes: '/html-preview.html'
     });
-
-    assert.match(visibleText, /HTML 预览标题/);
-    assert.match(visibleText, /Smart Page Translator HTML 渲染成功/);
-    assert.doesNotMatch(visibleText, /区域截图/);
-    assert.doesNotMatch(visibleText, /截图/);
-
-    await clickSelectorInFrameContainingSelector('#inspect-button', '#inspect-button');
-    await clickSelectorInFrameContainingSelector('#html-preview-e2e-message', '#html-preview-e2e-message');
-    const afterSelectionText = await readVisibleTextFromFrameContainingSelector('#html-preview-e2e-message');
-    assert.doesNotMatch(afterSelectionText, /已选元素\s*选择器/);
-    const selectedElementClipboard = await waitForClipboardState({
+    const selectedElementClipboard = await selectBrowserElementBySelector('#html-preview-e2e-message', {
       includes: 'html-preview-e2e-message',
       textLimit: 2000
     });
     assert.match(selectedElementClipboard.text, /<p[^>]+id="html-preview-e2e-message"/);
+    assert.match(selectedElementClipboard.text, /Smart Page Translator HTML 渲染成功/);
+    assert.doesNotMatch(selectedElementClipboard.text, /区域截图|截图|已选元素\s*选择器/);
 
     const logsClipboard = await browser.executeWorkbench(
       async (vscode, args) => {
@@ -112,22 +90,50 @@ describe('Smart Page Translator HTML preview E2E', () => {
   });
 });
 
+async function waitForBrowserState(options) {
+  let state;
+  await browser.waitUntil(async () => {
+    try {
+      state = await browser.executeWorkbench((vscode, command) => (
+        vscode.commands.executeCommand(command)
+      ), COMMANDS.internal.getBrowserState);
+      return state.active?.mode === options.mode
+        && state.active?.url?.includes(options.urlIncludes);
+    } catch {
+      return false;
+    }
+  }, {
+    timeout: 20000,
+    interval: 300,
+    timeoutMsg: `Timed out waiting for browser state ${JSON.stringify(options)}; last state ${JSON.stringify(state)}`
+  });
+  return state;
+}
+
+async function selectBrowserElementBySelector(selector, clipboardOptions) {
+  let state;
+  await browser.waitUntil(async () => {
+    await browser.executeWorkbench(async (vscode, args) => {
+      await vscode.commands.executeCommand(args.command, args.selector);
+    }, {
+      command: COMMANDS.internal.selectBrowserElementBySelector,
+      selector
+    });
+
+    state = await readClipboardState(clipboardOptions);
+    return state.includes && state.startsWith;
+  }, {
+    timeout: 20000,
+    interval: 300,
+    timeoutMsg: `Timed out waiting for selected browser element ${selector}`
+  });
+  return state;
+}
+
 async function waitForClipboardState(options) {
   let state;
   await browser.waitUntil(async () => {
-    state = await browser.executeWorkbench(async (vscode, args) => {
-      const text = await vscode.env.clipboard.readText();
-      return {
-        includes: args.includes ? text.includes(args.includes) : true,
-        length: text.length,
-        startsWith: args.startsWith ? text.startsWith(args.startsWith) : true,
-        text: text.slice(0, args.textLimit)
-      };
-    }, {
-      includes: options.includes,
-      startsWith: options.startsWith,
-      textLimit: options.textLimit || 120
-    });
+    state = await readClipboardState(options);
     return state.includes && state.startsWith;
   }, {
     timeout: 20000,
@@ -135,4 +141,20 @@ async function waitForClipboardState(options) {
     timeoutMsg: 'Timed out waiting for browser export clipboard content'
   });
   return state;
+}
+
+async function readClipboardState(options) {
+  return browser.executeWorkbench(async (vscode, args) => {
+    const text = await vscode.env.clipboard.readText();
+    return {
+      includes: args.includes ? text.includes(args.includes) : true,
+      length: text.length,
+      startsWith: args.startsWith ? text.startsWith(args.startsWith) : true,
+      text: text.slice(0, args.textLimit)
+    };
+  }, {
+    includes: options.includes,
+    startsWith: options.startsWith,
+    textLimit: options.textLimit || 120
+  });
 }

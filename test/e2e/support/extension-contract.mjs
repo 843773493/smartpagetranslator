@@ -45,6 +45,8 @@ export const COMMANDS = {
     getBrowserState: 'smartPageTranslator.internal.getBrowserState',
     getLastAstOutline: 'smartPageTranslator.internal.getLastAstOutline',
     getRootFileQuickPathStorage: 'smartPageTranslator.internal.getRootFileQuickPathStorage',
+    selectBrowserElementBySelector: 'smartPageTranslator.internal.selectBrowserElementBySelector',
+    setBrowserInspectMode: 'smartPageTranslator.internal.setBrowserInspectMode',
     useDeterministicTranslator: 'smartPageTranslator.internal.useDeterministicTranslator'
   },
   notes: {
