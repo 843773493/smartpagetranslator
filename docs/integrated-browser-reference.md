@@ -91,6 +91,7 @@ VS Code 中相关实现分为两类：
 
 - 代理按页面 token 维护隔离的 Cookie 会话，支持常见 domain/path/secure/expiry 规则；OAuth、验证码和第三方 Cookie 流程仍不属于已验证范围。
 - JavaScript 和 CSS 资源重写用于常见模块与静态资源，WebSocket upgrade 通过同一页面 token 双向转发；Service Worker、import map 和复杂流式响应仍可能需要站点级适配。
+- URL Webview CSP 允许常见站点使用的动态脚本执行；浏览器工具栏占用独立顶部区域，页面视口从工具栏下方开始，fixed 页面内容不会再被遮挡。
 - Remote-SSH 分支通过 `vscode.env.asExternalUri()` 暴露代理端口，尚缺真实 Windows + Remote-SSH 的自动化环境验证。
 - DevTools 命令依赖 VS Code 提供的 Webview DevTools command，不等同于 core BrowserView 的 `webContents.toggleDevTools()`。
 

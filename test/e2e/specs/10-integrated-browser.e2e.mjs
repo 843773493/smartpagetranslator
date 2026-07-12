@@ -82,6 +82,7 @@ describe('Smart Page Translator integrated browser E2E', () => {
       await waitForServerRequest(server, request => (
         request.pathname === '/script-executed'
           && request.searchParams.get('from') === '/first'
+          && request.searchParams.get('eval') === '42'
           && request.cookie.includes('spt_session=e2e-session')
       ), 'module script execution for /first');
 
@@ -134,6 +135,8 @@ describe('Smart Page Translator integrated browser E2E', () => {
         interval: 300,
         timeoutMsg: `Timed out loading the codicon font from ${realBrowserUrl}`
       });
+      const rootTop = await browser.execute(() => document.querySelector('#root')?.getBoundingClientRect().top);
+      assert.ok(Number(rootTop) >= 36, `Expected page root below browser toolbar, got top=${rootTop}`);
     } finally {
       await switchToTopFrame();
     }
@@ -193,7 +196,8 @@ async function startHttpFixtureServer() {
 		import '/styles/vite-font.css';
         document.body.dataset.smartPageTranslatorModule = 'executed';
 		document.getElementById('browser-http-e2e-message').textContent = message;
-        fetch('/script-executed?from=' + encodeURIComponent(new URL(document.baseURI).pathname), { cache: 'no-store' });
+        const evaluated = eval('21 * 2');
+        fetch('/script-executed?from=' + encodeURIComponent(new URL(document.baseURI).pathname) + '&eval=' + evaluated, { cache: 'no-store' });
       `);
       return;
     }

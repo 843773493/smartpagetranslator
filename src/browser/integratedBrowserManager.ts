@@ -1606,7 +1606,7 @@ function renderLocalHtmlPreviewDocument(
 			`media-src data: blob: http: https:`,
 			`font-src data: http: https:`,
 			`style-src 'unsafe-inline' http: https:`,
-			`script-src 'unsafe-inline' http: https: data: blob:`,
+			`script-src 'unsafe-inline' 'unsafe-eval' http: https: data: blob:`,
 			`connect-src *`,
 			`frame-src data: blob: http: https:`
 		].join('; ')
@@ -1769,10 +1769,15 @@ function getLocalPreviewCss(): string {
 	border-color: var(--vscode-editorError-foreground, #f14c4c);
 }
 html {
-	scroll-padding-top: 44px !important;
+	overflow: hidden !important;
 }
 body {
-	padding-top: 44px !important;
+	height: calc(100vh - 37px) !important;
+	min-height: calc(100vh - 37px) !important;
+	padding-top: 0 !important;
+	overflow: auto !important;
+	transform: translateY(37px) !important;
+	transform-origin: top left !important;
 }
 .spt-browser-hover-outline {
 	outline: 2px solid var(--vscode-focusBorder, #007fd4) !important;
@@ -1857,7 +1862,7 @@ function installToolbar() {
 		'<button type="button" id="devtools-button" title="打开 Webview 开发人员工具">DevTools</button>',
 		'</nav>'
 	].join('');
-	document.body.prepend(toolbar);
+	document.documentElement.appendChild(toolbar);
 
 		const urlInput = document.getElementById('url-input');
 		urlInput.value = settings.url || location.href;
@@ -1914,7 +1919,7 @@ function installToolbar() {
 	const toast = document.createElement('section');
 	toast.id = 'smart-page-translator-browser-toast';
 	toast.setAttribute('aria-live', 'polite');
-	document.body.appendChild(toast);
+	document.documentElement.appendChild(toast);
 }
 
 	function reportPageError(message) {

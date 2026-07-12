@@ -24,6 +24,7 @@
 - 每个代理页面 token 维护隔离的 Cookie 会话，并按 domain/path/secure/expiry 匹配；不得把目标站 `Set-Cookie` 原样暴露给 Webview。
 - HTTP 代理必须同时处理 WebSocket upgrade，并把文本、二进制、关闭和错误事件双向转发到原始页面 host；Vite HMR 的连接失败属于测试失败，不能作为可忽略日志。
 - URL 首文档加载失败必须渲染可见错误文档，页面运行时错误必须写入日志并显示错误提示，禁止静默白屏。
+- URL 模式 CSP 需要兼容常见站点的动态脚本执行；工具栏挂载在 `<html>` 层，页面 `body` 整体下移并缩短视口，禁止用覆盖式 toolbar 遮挡 fixed 页面顶部，也不要包裹页面 body 子节点破坏直属 CSS selector。
 - URL 页面元素选择通过注入桥和 `smartPageTranslator.internal.selectBrowserElementBySelector` 验证；只断言选择结果时传 `{ copyToClipboard: false }`，避免把剪贴板稳定性混进 URL 代理测试。
 - 真实鼠标选择回归使用 `SPT_E2E_BROWSER_URL=<url>` 启用，必须验证业务 DOM、WebDriver 点击和关键字体实际加载；内部 selector 命令不能替代真实交互验收。
 - 命令和 E2E 需要通过系统剪贴板验证导出结果，不要弹保存路径对话框。
