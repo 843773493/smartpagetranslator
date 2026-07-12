@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
 import * as http from 'http';
 import { TextDecoder } from 'util';
+import { parse } from '@babel/parser';
+import traverseModule from '@babel/traverse';
+import WebSocket, { WebSocketServer } from 'ws';
 import * as vscode from 'vscode';
 import { basenameOfUri, displayPathOfUri, isHtmlUri, parentUriOf } from '../files/rootFileUri';
 
@@ -37,6 +40,16 @@ type ElementSnapshot = {
 
 type BrowserSelectionOptions = {
 	readonly copyToClipboard?: boolean;
+};
+
+type StoredProxyCookie = {
+	readonly name: string;
+	readonly value: string;
+	readonly domain: string;
+	readonly path: string;
+	readonly secure: boolean;
+	readonly hostOnly: boolean;
+	readonly expiresAt?: number;
 };
 
 type BrowserInput = {
@@ -150,7 +163,24 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		}
 
 		const normalized = normalizeBrowserUrl(url);
-		const proxied = isHttpUrl(normalized) ? await this.urlProxy.createProxiedHtml(normalized) : undefined;
+		let proxied: Awaited<ReturnType<BrowserUrlProxy['createProxiedHtml']>> | undefined;
+		if (isHttpUrl(normalized)) {
+			try {
+				proxied = await this.urlProxy.createProxiedHtml(normalized);
+			} catch (error) {
+				const message = formatUnknownError(error);
+				void vscode.window.showErrorMessage(`网页加载失败：${message}`);
+				this.open({
+					key: STANDALONE_BROWSER_KEY,
+					title: `加载失败 ${normalized}`,
+					mode: 'url',
+					url: normalized,
+					html: renderBrowserLoadErrorDocument(normalized, message),
+					baseHref: normalized
+				});
+				return;
+			}
+		}
 		this.open({
 			key: STANDALONE_BROWSER_KEY,
 			title: `浏览 ${proxied?.resolvedUrl || normalized}`,
@@ -385,7 +415,9 @@ function formatExtensionKind(kind: vscode.ExtensionKind): 'ui' | 'workspace' | '
 
 class BrowserUrlProxy implements vscode.Disposable {
 	private readonly pageTargets = new Map<string, string>();
+	private readonly cookieJars = new Map<string, Map<string, StoredProxyCookie>>();
 	private server: http.Server | undefined;
+	private webSocketServer: WebSocketServer | undefined;
 	private port: number | undefined;
 	private startPromise: Promise<number> | undefined;
 	private lastPageToken: string | undefined;
@@ -399,7 +431,8 @@ class BrowserUrlProxy implements vscode.Disposable {
 		readonly resourceBaseUrl: string;
 	}> {
 		const handle = await this.createPageHandle(targetUrl);
-		let upstream = await fetchBrowserDocument(targetUrl);
+		let upstream = await fetchBrowserDocument(targetUrl, this.createCookieHeader(handle.token, targetUrl));
+		this.storeResponseCookies(handle.token, upstream, targetUrl);
 		let contentType = upstream.headers.get('content-type') || '';
 		let resolvedUrl = upstream.url || targetUrl;
 		if (!contentType.toLowerCase().includes('text/html')) {
@@ -415,7 +448,8 @@ class BrowserUrlProxy implements vscode.Disposable {
 		let html = await upstream.text();
 		const clientRedirect = resolveInitialClientRedirect(html, resolvedUrl);
 		if (clientRedirect) {
-			upstream = await fetchBrowserDocument(clientRedirect);
+			upstream = await fetchBrowserDocument(clientRedirect, this.createCookieHeader(handle.token, clientRedirect));
+			this.storeResponseCookies(handle.token, upstream, clientRedirect);
 			contentType = upstream.headers.get('content-type') || '';
 			resolvedUrl = upstream.url || clientRedirect;
 			html = await upstream.text();
@@ -434,8 +468,11 @@ class BrowserUrlProxy implements vscode.Disposable {
 
 	public dispose(): void {
 		this.pageTargets.clear();
+		this.cookieJars.clear();
 		this.lastPageToken = undefined;
 		if (this.server) {
+			this.webSocketServer?.close();
+			this.webSocketServer = undefined;
 			this.server.close();
 			this.server = undefined;
 			this.port = undefined;
@@ -451,6 +488,8 @@ class BrowserUrlProxy implements vscode.Disposable {
 		const port = await this.ensureStarted();
 		const token = randomUUID();
 		this.pageTargets.set(token, targetUrl);
+		this.cookieJars.set(token, new Map());
+		this.lastPageToken = token;
 		const visibleTarget = new URL(targetUrl);
 		const proxyUrl = new URL(`http://127.0.0.1:${port}${visibleTarget.pathname}${visibleTarget.search}`);
 		proxyUrl.searchParams.set(PROXY_PAGE_TOKEN_QUERY, token);
@@ -472,6 +511,10 @@ class BrowserUrlProxy implements vscode.Disposable {
 
 		this.server = http.createServer((request, response) => {
 			void this.handleRequest(request, response);
+		});
+		this.webSocketServer = new WebSocketServer({ noServer: true });
+		this.server.on('upgrade', (request, socket, head) => {
+			void this.handleWebSocketUpgrade(request, socket, head);
 		});
 
 		this.startPromise = new Promise<number>((resolve, reject) => {
@@ -535,6 +578,54 @@ class BrowserUrlProxy implements vscode.Disposable {
 		}
 	}
 
+	private async handleWebSocketUpgrade(
+		request: http.IncomingMessage,
+		socket: import('stream').Duplex,
+		head: Buffer
+	): Promise<void> {
+		const webSocketServer = this.webSocketServer;
+		if (!webSocketServer) {
+			rejectWebSocketUpgrade(socket, 503, 'WebSocket proxy is unavailable');
+			return;
+		}
+
+		try {
+			const requestUrl = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
+			const token = requestUrl.searchParams.get(PROXY_PAGE_TOKEN_QUERY) || this.lastPageToken;
+			const pageTarget = token ? this.pageTargets.get(token) : undefined;
+			if (!token || !pageTarget) {
+				rejectWebSocketUpgrade(socket, 404, 'Unknown proxy page');
+				return;
+			}
+
+			const upstreamUrl = new URL(`${requestUrl.pathname}${requestUrl.search}`, pageTarget);
+			upstreamUrl.protocol = upstreamUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+			upstreamUrl.searchParams.delete(PROXY_PAGE_TOKEN_QUERY);
+			const protocols = parseWebSocketProtocols(request.headers['sec-websocket-protocol']);
+			const upstream = new WebSocket(upstreamUrl, protocols, {
+				headers: {
+					origin: new URL(pageTarget).origin,
+					'user-agent': 'SmartPageTranslator/1.0 VSCodeWebviewProxy',
+					...createCookieRequestHeader(this.createCookieHeader(token, upstreamUrl.toString()))
+				},
+				handshakeTimeout: 15_000
+			});
+
+			const failBeforeUpgrade = (error: Error): void => {
+				rejectWebSocketUpgrade(socket, 502, `WebSocket upstream error: ${error.message}`);
+			};
+			upstream.once('error', failBeforeUpgrade);
+			upstream.once('open', () => {
+				upstream.off('error', failBeforeUpgrade);
+				webSocketServer.handleUpgrade(request, socket, head, downstream => {
+					bridgeWebSockets(downstream, upstream);
+				});
+			});
+		} catch (error) {
+			rejectWebSocketUpgrade(socket, 502, `WebSocket proxy error: ${formatUnknownError(error)}`);
+		}
+	}
+
 	private async handlePageRequest(token: string, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
 		const targetUrl = this.pageTargets.get(token);
 		if (!targetUrl) {
@@ -552,9 +643,11 @@ class BrowserUrlProxy implements vscode.Disposable {
 			redirect: 'follow',
 			headers: {
 				accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-				'user-agent': 'SmartPageTranslator/1.0 VSCodeWebviewProxy'
+				'user-agent': 'SmartPageTranslator/1.0 VSCodeWebviewProxy',
+				...createCookieRequestHeader(this.createCookieHeader(token, targetUrl))
 			}
 		});
+		this.storeResponseCookies(token, upstream, upstream.url || targetUrl);
 		const contentType = upstream.headers.get('content-type') || '';
 		if (!contentType.toLowerCase().includes('text/html')) {
 			await writeUpstreamResponse(response, upstream, request.method === 'HEAD');
@@ -618,9 +711,13 @@ class BrowserUrlProxy implements vscode.Disposable {
 		const upstream = await fetch(targetUrl, {
 			method,
 			redirect: 'follow',
-			headers: createForwardHeaders(request),
+			headers: {
+				...createForwardHeaders(request),
+				...createCookieRequestHeader(this.createCookieHeader(token, targetUrl))
+			},
 			body
 		});
+		this.storeResponseCookies(token, upstream, upstream.url || targetUrl);
 		if (method === 'HEAD') {
 			await writeUpstreamResponse(response, upstream, true);
 			return;
@@ -684,6 +781,51 @@ class BrowserUrlProxy implements vscode.Disposable {
 			return (await vscode.env.asExternalUri(uri)).toString(true);
 		}
 		return uri.toString(true);
+	}
+
+	private createCookieHeader(token: string, targetUrl: string): string | undefined {
+		const jar = this.cookieJars.get(token);
+		if (!jar) {
+			return undefined;
+		}
+		const target = new URL(targetUrl);
+		const now = Date.now();
+		const matches: StoredProxyCookie[] = [];
+		for (const [key, cookie] of jar) {
+			if (cookie.expiresAt !== undefined && cookie.expiresAt <= now) {
+				jar.delete(key);
+				continue;
+			}
+			const domainMatches = cookie.hostOnly
+				? target.hostname === cookie.domain
+				: target.hostname === cookie.domain || target.hostname.endsWith(`.${cookie.domain}`);
+			if (domainMatches
+				&& target.pathname.startsWith(cookie.path)
+				&& (!cookie.secure || target.protocol === 'https:')) {
+				matches.push(cookie);
+			}
+		}
+		matches.sort((left, right) => right.path.length - left.path.length);
+		return matches.length ? matches.map(cookie => `${cookie.name}=${cookie.value}`).join('; ') : undefined;
+	}
+
+	private storeResponseCookies(token: string, response: Response, responseUrl: string): void {
+		const jar = this.cookieJars.get(token);
+		if (!jar) {
+			return;
+		}
+		for (const header of readSetCookieHeaders(response.headers)) {
+			const cookie = parseSetCookie(header, responseUrl);
+			if (!cookie) {
+				continue;
+			}
+			const key = `${cookie.domain}\n${cookie.path}\n${cookie.name}`;
+			if (cookie.expiresAt !== undefined && cookie.expiresAt <= Date.now()) {
+				jar.delete(key);
+			} else {
+				jar.set(key, cookie);
+			}
+		}
 	}
 }
 
@@ -1021,6 +1163,20 @@ function renderNonHtmlProxyDocument(targetUrl: string, contentType: string, body
 </html>`;
 }
 
+function renderBrowserLoadErrorDocument(targetUrl: string, message: string): string {
+	return `<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>网页加载失败</title></head>
+<body>
+	<main id="smart-page-translator-load-error" role="alert">
+		<h1>网页加载失败</h1>
+		<p>${escapeHtml(targetUrl)}</p>
+		<pre>${escapeHtml(message)}</pre>
+	</main>
+</body>
+</html>`;
+}
+
 function rewriteProxiedHtmlResourceUrls(html: string, targetUrl: string, resourceBaseUrl: string): string {
 	const rewriteAttribute = (source: string, tagNamePattern: string, attributeName: string): string => {
 		const pattern = new RegExp(`(<${tagNamePattern}\\b[^>]*?\\s${attributeName}\\s*=\\s*)(["'])(.*?)\\2`, 'gi');
@@ -1034,6 +1190,12 @@ function rewriteProxiedHtmlResourceUrls(html: string, targetUrl: string, resourc
 	rewritten = rewriteAttribute(rewritten, '(?:video|audio)', 'poster');
 	rewritten = rewriteAttribute(rewritten, 'object', 'data');
 	rewritten = rewriteAttribute(rewritten, 'link', 'href');
+	rewritten = rewritten.replace(
+		/(<script\b(?=[^>]*\btype\s*=\s*(["']?)module\2)(?![^>]*\bsrc\s*=)[^>]*>)([\s\S]*?)(<\/script>)/gi,
+		(_match, openingTag: string, _typeQuote: string, source: string, closingTag: string) => (
+			`${openingTag}${rewriteJavaScriptResourceUrls(source, targetUrl, resourceBaseUrl)}${closingTag}`
+		)
+	);
 	rewritten = rewritten.replace(/(<(?:img|source)\b[^>]*?\ssrcset\s*=\s*)(["'])(.*?)\2/gi, (
 		_match,
 		prefix: string,
@@ -1085,22 +1247,63 @@ function isCssContentType(contentType: string): boolean {
 }
 
 function rewriteJavaScriptResourceUrls(source: string, targetUrl: string, resourceBaseUrl: string): string {
-	const rewriteSpecifier = (specifier: string): string => (
-		resolveProxiedResourceUrl(specifier, targetUrl, resourceBaseUrl)
-	);
+	const ast = parse(source, {
+		sourceType: 'unambiguous',
+		plugins: ['jsx', 'typescript', 'dynamicImport', 'importAttributes']
+	});
+	const replacements: Array<{ readonly start: number; readonly end: number; readonly value: string }> = [];
+	const addTextReplacement = (node: { readonly start?: number | null; readonly end?: number | null }, value: string): void => {
+		if (typeof node.start !== 'number' || typeof node.end !== 'number') {
+			return;
+		}
+		replacements.push({ start: node.start, end: node.end, value });
+	};
+	const addReplacement = (node: { readonly start?: number | null; readonly end?: number | null; readonly value?: unknown }): void => {
+		if (typeof node.start !== 'number' || typeof node.end !== 'number' || typeof node.value !== 'string') {
+			return;
+		}
+		const resolved = resolveProxiedResourceUrl(node.value, targetUrl, resourceBaseUrl);
+		if (resolved === node.value) {
+			return;
+		}
+		const original = source.slice(node.start, node.end);
+		const quote = original.startsWith("'") ? "'" : '"';
+		addTextReplacement(node, `${quote}${resolved}${quote}`);
+	};
 
-	let rewritten = source.replace(
-		/(\b(?:import|export)\s+(?:[^'";]*?\s+from\s*)?)(['"])([^'"\r\n]+)\2/g,
-		(_match, prefix: string, quote: string, specifier: string) => (
-			`${prefix}${quote}${rewriteSpecifier(specifier)}${quote}`
-		)
-	);
-	rewritten = rewritten.replace(
-		/(\bimport\s*\(\s*)(['"])([^'"\r\n]+)\2(\s*\))/g,
-		(_match, prefix: string, quote: string, specifier: string, suffix: string) => (
-			`${prefix}${quote}${rewriteSpecifier(specifier)}${quote}${suffix}`
-		)
-	);
+	traverseModule(ast, {
+		ImportDeclaration(path) {
+			addReplacement(path.node.source);
+		},
+		ExportNamedDeclaration(path) {
+			if (path.node.source) {
+				addReplacement(path.node.source);
+			}
+		},
+		ExportAllDeclaration(path) {
+			addReplacement(path.node.source);
+		},
+		CallExpression(path) {
+			if (path.node.callee.type === 'Import' && path.node.arguments[0]?.type === 'StringLiteral') {
+				addReplacement(path.node.arguments[0]);
+			}
+		},
+		VariableDeclarator(path) {
+			if (path.node.id.type === 'Identifier'
+				&& path.node.id.name === '__vite__css'
+				&& path.node.init?.type === 'StringLiteral') {
+				const rewrittenCss = rewriteCssResourceUrls(path.node.init.value, targetUrl, resourceBaseUrl);
+				if (rewrittenCss !== path.node.init.value) {
+					addTextReplacement(path.node.init, JSON.stringify(rewrittenCss));
+				}
+			}
+		}
+	});
+
+	let rewritten = source;
+	for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
+		rewritten = `${rewritten.slice(0, replacement.start)}${replacement.value}${rewritten.slice(replacement.end)}`;
+	}
 	return rewritten;
 }
 
@@ -1211,15 +1414,128 @@ function isHttpUrl(value: string): boolean {
 	}
 }
 
-function fetchBrowserDocument(targetUrl: string): Promise<Response> {
+function fetchBrowserDocument(targetUrl: string, cookieHeader?: string): Promise<Response> {
 	return fetch(targetUrl, {
 		method: 'GET',
 		redirect: 'follow',
 		headers: {
 			accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-			'user-agent': 'SmartPageTranslator/1.0 VSCodeWebviewProxy'
+			'user-agent': 'SmartPageTranslator/1.0 VSCodeWebviewProxy',
+			...createCookieRequestHeader(cookieHeader)
 		}
 	});
+}
+
+function createCookieRequestHeader(cookieHeader: string | undefined): Record<string, string> {
+	return cookieHeader ? { cookie: cookieHeader } : {};
+}
+
+function readSetCookieHeaders(headers: Headers): readonly string[] {
+	const extended = headers as Headers & { getSetCookie?: () => string[] };
+	if (typeof extended.getSetCookie === 'function') {
+		return extended.getSetCookie();
+	}
+	const combined = headers.get('set-cookie');
+	return combined ? combined.split(/,(?=\s*[^;,=\s]+\s*=)/) : [];
+}
+
+function parseSetCookie(header: string, responseUrl: string): StoredProxyCookie | undefined {
+	const response = new URL(responseUrl);
+	const [nameValue, ...attributes] = header.split(';');
+	const separator = nameValue.indexOf('=');
+	if (separator <= 0) {
+		return undefined;
+	}
+	const name = nameValue.slice(0, separator).trim();
+	const value = nameValue.slice(separator + 1).trim();
+	let domain = response.hostname.toLowerCase();
+	let path = defaultCookiePath(response.pathname);
+	let secure = false;
+	let hostOnly = true;
+	let expiresAt: number | undefined;
+
+	for (const rawAttribute of attributes) {
+		const attributeSeparator = rawAttribute.indexOf('=');
+		const attributeName = (attributeSeparator < 0 ? rawAttribute : rawAttribute.slice(0, attributeSeparator)).trim().toLowerCase();
+		const attributeValue = attributeSeparator < 0 ? '' : rawAttribute.slice(attributeSeparator + 1).trim();
+		if (attributeName === 'domain' && attributeValue) {
+			const requestedDomain = attributeValue.replace(/^\./, '').toLowerCase();
+			if (response.hostname === requestedDomain || response.hostname.endsWith(`.${requestedDomain}`)) {
+				domain = requestedDomain;
+				hostOnly = false;
+			}
+		} else if (attributeName === 'path' && attributeValue.startsWith('/')) {
+			path = attributeValue;
+		} else if (attributeName === 'secure') {
+			secure = true;
+		} else if (attributeName === 'max-age' && /^-?\d+$/.test(attributeValue)) {
+			expiresAt = Date.now() + Number(attributeValue) * 1000;
+		} else if (attributeName === 'expires' && expiresAt === undefined) {
+			const parsed = Date.parse(attributeValue);
+			if (!Number.isNaN(parsed)) {
+				expiresAt = parsed;
+			}
+		}
+	}
+
+	return { name, value, domain, path, secure, hostOnly, expiresAt };
+}
+
+function defaultCookiePath(pathname: string): string {
+	if (!pathname.startsWith('/') || pathname === '/') {
+		return '/';
+	}
+	const finalSlash = pathname.lastIndexOf('/');
+	return finalSlash <= 0 ? '/' : pathname.slice(0, finalSlash);
+}
+
+function parseWebSocketProtocols(value: string | string[] | undefined): string[] {
+	const combined = Array.isArray(value) ? value.join(',') : value || '';
+	return combined.split(',').map(protocol => protocol.trim()).filter(Boolean);
+}
+
+function bridgeWebSockets(downstream: WebSocket, upstream: WebSocket): void {
+	downstream.on('message', (data, isBinary) => {
+		if (upstream.readyState === WebSocket.OPEN) {
+			upstream.send(data, { binary: isBinary });
+		}
+	});
+	upstream.on('message', (data, isBinary) => {
+		if (downstream.readyState === WebSocket.OPEN) {
+			downstream.send(data, { binary: isBinary });
+		}
+	});
+
+	downstream.on('close', (code, reason) => closePeerWebSocket(upstream, code, reason));
+	upstream.on('close', (code, reason) => closePeerWebSocket(downstream, code, reason));
+	downstream.on('error', () => upstream.terminate());
+	upstream.on('error', () => downstream.terminate());
+}
+
+function closePeerWebSocket(peer: WebSocket, code: number, reason: Buffer): void {
+	if (peer.readyState !== WebSocket.OPEN && peer.readyState !== WebSocket.CONNECTING) {
+		return;
+	}
+	if (peer.readyState === WebSocket.CONNECTING || code < 1000 || code === 1005 || code === 1006) {
+		peer.terminate();
+		return;
+	}
+	peer.close(code, reason.toString('utf8').slice(0, 123));
+}
+
+function rejectWebSocketUpgrade(socket: import('stream').Duplex, statusCode: number, message: string): void {
+	if (socket.destroyed) {
+		return;
+	}
+	const body = Buffer.from(message, 'utf8');
+	socket.end([
+		`HTTP/1.1 ${statusCode} ${http.STATUS_CODES[statusCode] || 'Error'}`,
+		'Connection: close',
+		'Content-Type: text/plain; charset=utf-8',
+		`Content-Length: ${body.length}`,
+		'',
+		message
+	].join('\r\n'));
 }
 
 function resolveInitialClientRedirect(html: string, currentUrl: string): string | undefined {
@@ -1471,16 +1787,17 @@ const settings = JSON.parse(document.getElementById('browser-settings')?.textCon
 let inspectMode = false;
 let hoveredElement;
 	let toastTimer;
+	let pendingPageError;
 
 	patchConsole();
 	if (settings.resourceBaseUrl) {
 		patchNetworkRequests();
 	}
 	window.addEventListener('error', event => {
-	recordLog('error', event.message, 'page');
+	reportPageError(event.message);
 });
 window.addEventListener('unhandledrejection', event => {
-	recordLog('error', 'Unhandled rejection: ' + stringifyValue(event.reason), 'page');
+	reportPageError('Unhandled rejection: ' + stringifyValue(event.reason));
 });
 window.addEventListener('message', event => {
 	const data = event.data;
@@ -1507,7 +1824,13 @@ if (document.readyState === 'loading') {
 	function initializePreview() {
 		installToolbar();
 		installToast();
+		if (pendingPageError) {
+			showToast('页面脚本错误：' + pendingPageError, 'error');
+		}
 		document.addEventListener('mousemove', handleInspectMove, true);
+		document.addEventListener('pointerdown', handleInspectPointerEvent, true);
+		document.addEventListener('mousedown', handleInspectPointerEvent, true);
+		document.addEventListener('mouseup', handleInspectPointerEvent, true);
 		document.addEventListener('click', handleInspectClick, true);
 		document.addEventListener('click', handleLinkClick, true);
 		vscode.postMessage({ type: 'ready' });
@@ -1594,6 +1917,14 @@ function installToolbar() {
 	document.body.appendChild(toast);
 }
 
+	function reportPageError(message) {
+		pendingPageError = String(message || '未知页面脚本错误');
+		recordLog('error', pendingPageError, 'page');
+		if (document.getElementById('smart-page-translator-browser-toast')) {
+			showToast('页面脚本错误：' + pendingPageError, 'error');
+		}
+	}
+
 	function patchConsole() {
 		['log', 'info', 'warn', 'error'].forEach(level => {
 			const original = console[level];
@@ -1657,12 +1988,20 @@ function installToolbar() {
 	hoveredElement.classList.add('spt-browser-hover-outline');
 }
 
+function handleInspectPointerEvent(event) {
+	if (!inspectMode || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
+		return;
+	}
+	event.preventDefault();
+	event.stopImmediatePropagation();
+}
+
 function handleInspectClick(event) {
 	if (!inspectMode || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
 		return;
 	}
 	event.preventDefault();
-	event.stopPropagation();
+	event.stopImmediatePropagation();
 	const element = describeElement(event.target);
 	postSelectedElement(element);
 }

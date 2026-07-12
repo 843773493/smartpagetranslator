@@ -89,8 +89,8 @@ VS Code 中相关实现分为两类：
 
 ## 已知边界
 
-- 代理目前不维护目标站点 Cookie 会话，登录页、验证码和依赖 Cookie 的应用不属于已验证范围。
-- JavaScript 和 CSS 资源重写用于常见模块与静态资源；Service Worker、WebSocket、import map 和复杂流式响应仍可能需要站点级适配。
+- 代理按页面 token 维护隔离的 Cookie 会话，支持常见 domain/path/secure/expiry 规则；OAuth、验证码和第三方 Cookie 流程仍不属于已验证范围。
+- JavaScript 和 CSS 资源重写用于常见模块与静态资源，WebSocket upgrade 通过同一页面 token 双向转发；Service Worker、import map 和复杂流式响应仍可能需要站点级适配。
 - Remote-SSH 分支通过 `vscode.env.asExternalUri()` 暴露代理端口，尚缺真实 Windows + Remote-SSH 的自动化环境验证。
 - DevTools 命令依赖 VS Code 提供的 Webview DevTools command，不等同于 core BrowserView 的 `webContents.toggleDevTools()`。
 
@@ -106,4 +106,5 @@ E2E 覆盖：
 - 当前未直接用 `vscode.openWith` 做自动化打开验证：WDIO 的 `executeWorkbench` 路径会触发测试窗口卸载，已在 E2E 中保留 TODO，后续改用稳定 UI 自动化路径补充。
 - 通过根目录文件树预览命令打开 HTML 并验证渲染。
 - 验证本地 HTML 的元素选择和日志导出。
-- 验证 URL 命令、首屏客户端跳转、嵌套 ES Module、页面 fetch、CSS `@import`、图片资源和元素选择。
+- 验证 URL 命令、首屏客户端跳转、Cookie 会话、嵌套 ES Module、Vite 内联 module、页面 fetch、双向 WebSocket、CSS `@import`、Vite 注入 CSS、字体、图片资源、可见错误页和元素选择。
+- 设置 `SPT_E2E_BROWSER_URL` 时，在独立 VS Code 会话中对指定真实 URL 验证页面渲染、字体加载和 WebDriver 真实鼠标选择。

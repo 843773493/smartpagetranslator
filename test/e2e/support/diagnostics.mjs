@@ -481,7 +481,7 @@ export async function captureDiagnostics(label, error) {
   }
 }
 
-async function switchToFrameContainingSelector(selector, depth = 0) {
+export async function switchToFrameContainingSelector(selector, depth = 0) {
   if (await selectorExists(selector)) {
     return true;
   }
