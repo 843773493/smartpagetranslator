@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.2.19",
+  "version": "0.2.21",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -298,7 +298,7 @@
       "editor/title/context": [
         {
           "command": "smartPageTranslator.rootFiles.previewHtml",
-          "group": "navigation@1",
+          "group": "2_smartPageTranslator@1",
           "when": "resourceExtname =~ /\\.(html|htm)$/"
         },
         {
@@ -310,7 +310,7 @@
       "editor/context": [
         {
           "command": "smartPageTranslator.rootFiles.previewHtml",
-          "group": "navigation@1",
+          "group": "2_smartPageTranslator@1",
           "when": "editorTextFocus && resourceExtname =~ /\\.(html|htm)$/"
         },
         {

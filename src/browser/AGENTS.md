@@ -18,8 +18,8 @@
 
 - 扩展 API 可用能力优先；VS Code core BrowserView/CDP 私有能力只能作为参考，不能直接依赖。
 - 本地 HTML 使用 Webview 文档直出并注入必要的工具条与桥接脚本，方便日志和元素选择。
-- 远程网页 URL 先由扩展本地 HTTP 代理拉取、移除 CSP/X-Frame-Options、重写相对资源，再把注入后的 HTML 作为 Webview 文档直出；只有无法预取的非 HTTP(S) URL 才保留 iframe fallback。不要让 iframe 直接指向目标 URL 或代理 URL，否则会重新遇到跨域、CSP、`chrome-error://chromewebdata` 导航限制。
-- URL 页面脚本运行在 Webview 注入文档环境；需要目标地址时优先依赖注入的 `<base href="原始 URL">`、`document.baseURI` 或代理桥接设置，不要假设 `location.href` 等于原始网页 URL。
+- HTTP(S) URL 使用最薄的 `srcdoc` relay shell 承载内层代理 iframe；禁止把目标站 HTML 读取后塞进 `srcdoc`。顶层网页、静态子 iframe 和运行时创建的子 iframe 都必须由同一个代理 origin 返回并注入 bridge，以尽量保留站点内部的同源 frame 关系。
+- URL 页面脚本运行在代理 HTTP 文档环境；需要原始目标地址时依赖注入的 `<base href="原始 URL">`、`document.baseURI` 或代理桥接设置。嵌套 frame 的 bridge 必须把日志和选择结果发给 Webview 顶层，并接收逐层传播的选择控制消息。
 - JavaScript module URL 必须通过 Babel AST 定位 import/export specifier；禁止退回正则扫描 JavaScript 源码。Vite 注入 CSS 的 `__vite__css` 字符串需要继续走 CSS URL 重写。
 - 每个代理页面 token 维护隔离的 Cookie 会话，并按 domain/path/secure/expiry 匹配；不得把目标站 `Set-Cookie` 原样暴露给 Webview。
 - HTTP 代理必须同时处理 WebSocket upgrade，并把文本、二进制、关闭和错误事件双向转发到原始页面 host；Vite HMR 的连接失败属于测试失败，不能作为可忽略日志。

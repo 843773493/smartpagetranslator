@@ -110,6 +110,7 @@ type BrowserDebugPanelState = {
 		readonly type: string;
 		readonly delivered?: boolean;
 	};
+	readonly recentLogs: readonly BrowserLogEntry[];
 	readonly visible: boolean;
 	readonly active: boolean;
 };
@@ -120,6 +121,11 @@ type BrowserDebugState = {
 	readonly remoteName?: string;
 	readonly extensionKind: 'ui' | 'workspace' | 'unknown';
 };
+
+function elementSnapshotMatchesSelector(element: ElementSnapshot | undefined, selector: string): boolean {
+	return element?.selector === selector
+		|| (selector.startsWith('#') && element?.id === selector.slice(1));
+}
 
 export class IntegratedBrowserManager implements vscode.Disposable {
 	private readonly urlProxy: BrowserUrlProxy;
@@ -163,10 +169,10 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		}
 
 		const normalized = normalizeBrowserUrl(url);
-		let proxied: Awaited<ReturnType<BrowserUrlProxy['createProxiedHtml']>> | undefined;
+		let proxyUrl: string | undefined;
 		if (isHttpUrl(normalized)) {
 			try {
-				proxied = await this.urlProxy.createProxiedHtml(normalized);
+				proxyUrl = await this.urlProxy.createPageUrl(normalized);
 			} catch (error) {
 				const message = formatUnknownError(error);
 				void vscode.window.showErrorMessage(`网页加载失败：${message}`);
@@ -183,13 +189,11 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		}
 		this.open({
 			key: STANDALONE_BROWSER_KEY,
-			title: `浏览 ${proxied?.resolvedUrl || normalized}`,
+			title: `浏览 ${normalized}`,
 			mode: 'url',
-			url: proxied?.resolvedUrl || normalized,
-			html: proxied?.html,
-			proxyUrl: proxied?.pageUrl,
-			baseHref: proxied?.resolvedUrl,
-			resourceBaseUrl: proxied?.resourceBaseUrl
+			url: normalized,
+			proxyUrl,
+			baseHref: normalized
 		});
 	}
 
@@ -541,8 +545,9 @@ class BrowserUrlProxy implements vscode.Disposable {
 	}
 
 	private async handleRequest(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
+		let requestUrl: URL | undefined;
 		try {
-			const requestUrl = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
+			requestUrl = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
 			if (request.method === 'OPTIONS') {
 				writeProxyResponse(response, 204, corsHeaders(), undefined);
 				return;
@@ -574,6 +579,24 @@ class BrowserUrlProxy implements vscode.Disposable {
 
 			writeProxyResponse(response, 404, { 'content-type': 'text/plain; charset=utf-8' }, 'Not found');
 		} catch (error) {
+			const token = requestUrl?.searchParams.get(PROXY_PAGE_TOKEN_QUERY);
+			const targetUrl = token ? this.pageTargets.get(token) : undefined;
+			if (token && targetUrl) {
+				const resourceBaseUrl = await this.createExternalResourceBaseUrl(token);
+				const rendered = renderProxiedBrowserDocument(
+					renderBrowserLoadErrorDocument(targetUrl, formatUnknownError(error)),
+					targetUrl,
+					resourceBaseUrl,
+					token,
+					true
+				);
+				writeProxyResponse(response, 502, {
+					...corsHeaders(),
+					'content-type': 'text/html; charset=utf-8',
+					'cache-control': 'no-store'
+				}, rendered);
+				return;
+			}
 			writeProxyResponse(response, 502, { 'content-type': 'text/plain; charset=utf-8' }, `Proxy error: ${formatUnknownError(error)}`);
 		}
 	}
@@ -638,7 +661,7 @@ class BrowserUrlProxy implements vscode.Disposable {
 		}
 		this.lastPageToken = token;
 
-		const upstream = await fetch(targetUrl, {
+		let upstream = await fetch(targetUrl, {
 			method: 'GET',
 			redirect: 'follow',
 			headers: {
@@ -648,15 +671,28 @@ class BrowserUrlProxy implements vscode.Disposable {
 			}
 		});
 		this.storeResponseCookies(token, upstream, upstream.url || targetUrl);
-		const contentType = upstream.headers.get('content-type') || '';
+		let contentType = upstream.headers.get('content-type') || '';
 		if (!contentType.toLowerCase().includes('text/html')) {
 			await writeUpstreamResponse(response, upstream, request.method === 'HEAD');
 			return;
 		}
 
-		const html = await upstream.text();
+		let resolvedUrl = upstream.url || targetUrl;
+		let html = await upstream.text();
+		const clientRedirect = resolveInitialClientRedirect(html, resolvedUrl);
+		if (clientRedirect) {
+			upstream = await fetchBrowserDocument(clientRedirect, this.createCookieHeader(token, clientRedirect));
+			this.storeResponseCookies(token, upstream, clientRedirect);
+			contentType = upstream.headers.get('content-type') || '';
+			resolvedUrl = upstream.url || clientRedirect;
+			if (!contentType.toLowerCase().includes('text/html')) {
+				await writeUpstreamResponse(response, upstream, request.method === 'HEAD');
+				return;
+			}
+			html = await upstream.text();
+		}
 		const resourceBaseUrl = await this.createExternalResourceBaseUrl(token);
-		const rendered = renderProxiedBrowserDocument(html, upstream.url || targetUrl, resourceBaseUrl);
+		const rendered = renderProxiedBrowserDocument(html, resolvedUrl, resourceBaseUrl, token, true);
 		writeProxyResponse(response, upstream.status || 200, {
 			...corsHeaders(),
 			'content-type': 'text/html; charset=utf-8',
@@ -724,6 +760,16 @@ class BrowserUrlProxy implements vscode.Disposable {
 		}
 
 		const contentType = upstream.headers.get('content-type') || '';
+		if (contentType.toLowerCase().includes('text/html')) {
+			const resourceBaseUrl = await this.createExternalResourceBaseUrl(token);
+			const html = await upstream.text();
+			const rendered = renderProxiedBrowserDocument(html, upstream.url || targetUrl, resourceBaseUrl, token);
+			writeProxyResponse(response, upstream.status || 200, {
+				...sanitizeUpstreamHeaders(upstream),
+				'content-type': 'text/html; charset=utf-8'
+			}, rendered);
+			return;
+		}
 		if (isJavaScriptContentType(contentType) || isCssContentType(contentType)) {
 			const resourceBaseUrl = await this.createExternalResourceBaseUrl(token);
 			const source = await upstream.text();
@@ -948,11 +994,20 @@ class IntegratedBrowserView implements vscode.Disposable {
 	}
 
 	public selectElementBySelector(selector: string, options?: BrowserSelectionOptions): void {
-		this.postMessage({
+		this.selectedElement = undefined;
+		const message: ExtensionToWebviewMessage = {
 			type: 'selectElementBySelector',
 			selector,
 			copyToClipboard: options?.copyToClipboard
-		});
+		};
+		this.postMessage(message);
+		for (const delay of [150, 450]) {
+			setTimeout(() => {
+				if (!this.disposed && !elementSnapshotMatchesSelector(this.selectedElement, selector)) {
+					this.postMessage(message);
+				}
+			}, delay);
+		}
 	}
 
 	public getDebugState(key: string): BrowserDebugPanelState {
@@ -965,6 +1020,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 			proxyUrl: this.currentInput.proxyUrl,
 			selectedElement: this.selectedElement,
 			lastPostMessage: this.lastPostMessage,
+			recentLogs: this.logs.slice(-20),
 			visible: this.panel.visible,
 			active: this.panel.active
 		};
@@ -1130,14 +1186,22 @@ function escapeAttribute(value: string): string {
 	return escapeHtml(value);
 }
 
-function renderProxiedBrowserDocument(html: string, targetUrl: string, resourceBaseUrl: string): string {
+function renderProxiedBrowserDocument(
+	html: string,
+	targetUrl: string,
+	resourceBaseUrl: string,
+	sessionToken: string,
+	topLevelProxyDocument = false
+): string {
 	const preparedHtml = rewriteProxiedHtmlResourceUrls(stripContentSecurityPolicyMeta(html), targetUrl, resourceBaseUrl);
 	const base = !/<base\b/i.test(preparedHtml)
 		? `<base href="${escapeAttribute(targetUrl)}">`
 		: '';
 	const proxySettings = JSON.stringify({
 		targetUrl,
-		resourceBaseUrl
+		resourceBaseUrl,
+		sessionToken,
+		topLevelProxyDocument
 	}).replace(/</g, '\\u003C');
 	const bridge = [
 		`window.__smartPageTranslatorProxy = ${proxySettings};`,
@@ -1688,13 +1752,17 @@ function getLocalPreviewCss(): string {
 #smart-page-translator-browser-toolbar {
 	position: fixed;
 	inset: 0 0 auto 0;
+	width: 100%;
+	max-width: 100%;
 	z-index: 2147483647;
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	min-width: 0;
 	min-height: 36px;
 	padding: 5px 8px;
 	box-sizing: border-box;
+	overflow: hidden;
 	color: var(--vscode-editor-foreground, #d4d4d4);
 	background: var(--vscode-editorGroupHeader-tabsBackground, #252526);
 	border-bottom: 1px solid var(--vscode-panel-border, #3c3c3c);
@@ -1708,6 +1776,8 @@ function getLocalPreviewCss(): string {
 	display: flex;
 	align-items: center;
 	gap: 4px;
+	min-width: 0;
+	flex: 0 0 auto;
 }
 #smart-page-translator-browser-toolbar button {
 	height: 26px;
@@ -1732,7 +1802,8 @@ function getLocalPreviewCss(): string {
 }
 #smart-page-translator-browser-toolbar #url-input {
 	flex: 1;
-	min-width: 80px;
+	width: 0;
+	min-width: 0;
 	height: 26px;
 	padding: 3px 8px;
 	color: var(--vscode-input-foreground, #cccccc);
@@ -1769,15 +1840,53 @@ function getLocalPreviewCss(): string {
 	border-color: var(--vscode-editorError-foreground, #f14c4c);
 }
 html {
+	box-sizing: border-box !important;
+	width: 100% !important;
+	height: 100% !important;
+	min-width: 0 !important;
+	min-height: 0 !important;
+	margin: 0 !important;
+	padding: 0 !important;
 	overflow: hidden !important;
 }
 body {
-	height: calc(100vh - 37px) !important;
-	min-height: calc(100vh - 37px) !important;
-	padding-top: 0 !important;
-	overflow: auto !important;
-	transform: translateY(37px) !important;
-	transform-origin: top left !important;
+	box-sizing: border-box !important;
+	position: fixed !important;
+	inset: 37px 0 0 0 !important;
+	width: auto !important;
+	height: auto !important;
+	min-width: 0 !important;
+	min-height: 0 !important;
+	max-width: 100% !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	overflow-x: auto !important;
+	overflow-y: auto !important;
+	scrollbar-gutter: stable !important;
+	overscroll-behavior: contain !important;
+	transform: none !important;
+}
+body::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+body::-webkit-scrollbar-track {
+	background: rgba(15, 23, 42, 0.22);
+}
+body::-webkit-scrollbar-thumb {
+	background: rgba(100, 116, 139, 0.72);
+	border: 2px solid transparent;
+	border-radius: 999px;
+	background-clip: padding-box;
+}
+body::-webkit-scrollbar-thumb:hover {
+	background: rgba(148, 163, 184, 0.86);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+}
+body {
+	scrollbar-color: rgba(100, 116, 139, 0.72) rgba(15, 23, 42, 0.22);
+	scrollbar-width: auto;
 }
 .spt-browser-hover-outline {
 	outline: 2px solid var(--vscode-focusBorder, #007fd4) !important;
@@ -1787,14 +1896,31 @@ body {
 
 function getLocalPreviewScript(): string {
 	return `
+(() => {
+// 扩展运行时隔离在闭包内，避免与页面脚本的全局变量冲突。
 const vscode = window.__smartPageTranslatorVsCodeApi || (window.__smartPageTranslatorVsCodeApi = acquireVsCodeApi());
 const settings = JSON.parse(document.getElementById('browser-settings')?.textContent || '{}');
 let inspectMode = false;
 let hoveredElement;
 	let toastTimer;
 	let pendingPageError;
+	let pageZoom = 1;
 
 	patchConsole();
+	// TODO: 当前集成浏览器运行在 Chromium，使用 CSS zoom 实现页面缩放；若后续支持非 Chromium，需要替换为布局变换方案。
+	function setPageZoom(value) {
+		pageZoom = Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
+		document.body.style.zoom = String(pageZoom);
+		document.body.style.overflowX = 'auto';
+	}
+	window.addEventListener('wheel', event => {
+		if (!event.ctrlKey && !event.metaKey) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		setPageZoom(pageZoom + (event.deltaY < 0 ? 0.1 : -0.1));
+	}, { capture: true, passive: false });
 	if (settings.resourceBaseUrl) {
 		patchNetworkRequests();
 	}
@@ -1976,6 +2102,9 @@ function installToolbar() {
 		if (!raw || /^(data|blob|about|javascript|mailto|tel):/i.test(raw)) {
 			return value;
 		}
+		if (raw.startsWith(proxy.resourceBaseUrl)) {
+			return raw;
+		}
 		try {
 			const resolved = new URL(raw, settings.baseHref || settings.url || document.baseURI || location.href).toString();
 			return settings.resourceBaseUrl + encodeURIComponent(resolved);
@@ -2154,7 +2283,8 @@ function isPreviewChrome(element) {
 
 function errorMessage(error) {
 	return error instanceof Error ? error.message : String(error);
-}`;
+}
+})();`;
 }
 
 function getWebviewCss(): string {
@@ -2166,6 +2296,8 @@ html,
 body {
 	width: 100%;
 	height: 100%;
+	min-width: 0;
+	min-height: 0;
 	margin: 0;
 	padding: 0;
 	overflow: hidden;
@@ -2177,16 +2309,18 @@ body {
 body {
 	display: grid;
 	position: relative;
-	grid-template-rows: auto 1fr;
+	grid-template-rows: 36px minmax(0, 1fr);
 }
 .browser-toolbar {
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	min-width: 0;
 	min-height: 36px;
 	padding: 5px 8px;
 	border-bottom: 1px solid var(--vscode-panel-border);
 	background: var(--vscode-editorGroupHeader-tabsBackground);
+	overflow: hidden;
 }
 .button-group {
 	display: flex;
@@ -2195,7 +2329,8 @@ body {
 }
 .url-input {
 	flex: 1;
-	min-width: 80px;
+	width: 0;
+	min-width: 0;
 	height: 26px;
 	padding: 3px 8px;
 	color: var(--vscode-input-foreground);
@@ -2251,11 +2386,16 @@ button:hover {
 }
 .browser-content {
 	position: relative;
+	min-width: 0;
 	min-height: 0;
+	overflow: hidden;
 }
 #browser-frame {
+	display: block;
 	width: 100%;
 	height: 100%;
+	max-width: 100%;
+	max-height: 100%;
 	border: 0;
 	background: #ffffff;
 }
@@ -2276,7 +2416,12 @@ function getFrameBridgeSource(): string {
 		(function smartPageTranslatorFrameBridge() {
 			const channel = 'smartPageTranslator.browser';
 			const proxy = window.__smartPageTranslatorProxy;
-			const send = (payload) => window.parent.postMessage({ channel, payload }, '*');
+			const send = (payload) => window.parent.postMessage({ channel, token: proxy && proxy.sessionToken, payload }, '*');
+			send({
+				type: 'frameReady',
+				url: proxy && proxy.targetUrl ? proxy.targetUrl : location.href,
+				topLevel: Boolean(proxy && proxy.topLevelProxyDocument)
+			});
 			const escapeCss = (value) => {
 			if (window.CSS && typeof window.CSS.escape === 'function') {
 				return window.CSS.escape(value);
@@ -2296,6 +2441,20 @@ function getFrameBridgeSource(): string {
 			return String(value);
 		}
 	};
+	let pageZoom = 1;
+	// TODO: 当前集成浏览器运行在 Chromium，使用 CSS zoom 实现页面缩放；若后续支持非 Chromium，需要替换为布局变换方案。
+	const setPageZoom = (value) => {
+		pageZoom = Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
+		document.documentElement.style.zoom = String(pageZoom);
+	};
+	window.addEventListener('wheel', event => {
+		if (!event.ctrlKey && !event.metaKey) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		setPageZoom(pageZoom + (event.deltaY < 0 ? 0.1 : -0.1));
+	}, { capture: true, passive: false });
 	const proxyResourceUrl = (value) => {
 		if (!proxy || !proxy.resourceBaseUrl) {
 			return value;
@@ -2307,6 +2466,9 @@ function getFrameBridgeSource(): string {
 				: String(value || '');
 		if (!raw || /^(data|blob|about|javascript|mailto|tel):/i.test(raw)) {
 			return value;
+		}
+		if (raw.startsWith(proxy.resourceBaseUrl)) {
+			return raw;
 		}
 		try {
 			const resolved = new URL(raw, proxy.targetUrl || document.baseURI || location.href).toString();
@@ -2330,8 +2492,13 @@ function getFrameBridgeSource(): string {
 		send({ type: 'pageLog', level: 'error', values: ['Unhandled rejection: ' + stringify(event.reason)] });
 	});
 
-	if (proxy && proxy.resourceBaseUrl) {
-		patchNetworkRequests();
+		if (proxy && proxy.resourceBaseUrl) {
+			try {
+				patchNetworkRequests();
+				patchDynamicFrames();
+			} catch (error) {
+				send({ type: 'pageLog', level: 'error', values: ['Proxy bridge patch failed: ' + stringify(error)] });
+			}
 	}
 
 	let inspectMode = false;
@@ -2385,10 +2552,20 @@ function getFrameBridgeSource(): string {
 		hovered = event.target;
 		hovered.classList.add('spt-browser-hover-outline');
 	}, true);
+	const blockInspectPointerEvent = event => {
+		if (!inspectMode || !(event.target instanceof Element)) {
+			return;
+		}
+		event.preventDefault();
+		event.stopImmediatePropagation();
+	};
+	document.addEventListener('pointerdown', blockInspectPointerEvent, true);
+	document.addEventListener('mousedown', blockInspectPointerEvent, true);
+	document.addEventListener('mouseup', blockInspectPointerEvent, true);
 	document.addEventListener('click', event => {
 		if (inspectMode && event.target instanceof Element) {
 			event.preventDefault();
-			event.stopPropagation();
+			event.stopImmediatePropagation();
 			send({ type: 'selectedElement', element: describeElement(event.target) });
 			return;
 		}
@@ -2407,17 +2584,25 @@ function getFrameBridgeSource(): string {
 		send({ type: 'navigateToUrl', url: href });
 	}, true);
 	window.addEventListener('message', event => {
-		if (!event.data || event.data.channel !== 'smartPageTranslator.browser.control') {
+		if (!event.data) {
 			return;
 		}
+		if (event.data.channel === 'smartPageTranslator.browser'
+			&& event.source !== window.parent) {
+			send(event.data.payload);
+			return;
+		}
+		if (event.data.channel !== 'smartPageTranslator.browser.control'
+			|| event.source !== window.parent) {
+			return;
+		}
+		send({ type: 'controlAck', stage: 'proxy', controlType: event.data.type });
 		if (event.data.type === 'setInspectMode') {
 			inspectMode = Boolean(event.data.enabled);
 			if (!inspectMode) {
 				clearHover();
 			}
-			return;
-		}
-		if (event.data.type === 'selectElementBySelector') {
+		} else if (event.data.type === 'selectElementBySelector') {
 			const selector = typeof event.data.selector === 'string' ? event.data.selector : '';
 			if (!selector) {
 				return;
@@ -2429,11 +2614,19 @@ function getFrameBridgeSource(): string {
 					hovered = element;
 					hovered.classList.add('spt-browser-hover-outline');
 					send({ type: 'selectedElement', element: describeElement(element), copyToClipboard: event.data.copyToClipboard });
+					return;
 				} else {
 					send({ type: 'pageLog', level: 'warn', values: ['Selector did not match any element: ' + selector] });
 				}
 			} catch (error) {
 				send({ type: 'pageLog', level: 'error', values: ['Invalid selector: ' + selector + ' - ' + stringify(error)] });
+			}
+		}
+		for (const childFrame of document.querySelectorAll('iframe')) {
+			try {
+				childFrame.contentWindow?.postMessage(event.data, '*');
+			} catch {
+				// A detached frame can disappear while control messages are being broadcast.
 			}
 		}
 	});
@@ -2455,7 +2648,7 @@ function getFrameBridgeSource(): string {
 		}
 	}
 
-	function patchNetworkRequests() {
+		function patchNetworkRequests() {
 		const originalFetch = window.fetch ? window.fetch.bind(window) : undefined;
 		if (originalFetch) {
 			window.fetch = function patchedFetch(input, init) {
@@ -2474,11 +2667,54 @@ function getFrameBridgeSource(): string {
 		}
 
 		const originalOpen = XMLHttpRequest.prototype.open;
-		XMLHttpRequest.prototype.open = function patchedOpen(method, url, async, user, password) {
-			return originalOpen.call(this, method, proxyResourceUrl(url), async, user, password);
-		};
-	}
-})();`;
+			XMLHttpRequest.prototype.open = function patchedOpen(method, url, async, user, password) {
+				return originalOpen.call(this, method, proxyResourceUrl(url), async, user, password);
+			};
+		}
+
+		function patchDynamicFrames() {
+			const rewriteFrame = (frame) => {
+				const raw = frame.getAttribute('src');
+				if (!raw || /^(data|blob|about|javascript):/i.test(raw)) {
+					return;
+				}
+				const rewritten = proxyResourceUrl(raw);
+				if (typeof rewritten === 'string' && rewritten !== raw) {
+					frame.setAttribute('src', rewritten);
+				}
+			};
+			const scan = (root) => {
+				if (root instanceof HTMLIFrameElement) {
+					rewriteFrame(root);
+				}
+				if (root && typeof root.querySelectorAll === 'function') {
+					root.querySelectorAll('iframe[src]').forEach(rewriteFrame);
+				}
+			};
+			const start = () => {
+				scan(document);
+				new MutationObserver(records => {
+					for (const record of records) {
+						if (record.type === 'attributes') {
+							scan(record.target);
+						} else {
+							record.addedNodes.forEach(scan);
+						}
+					}
+				}).observe(document.documentElement, {
+					childList: true,
+					subtree: true,
+					attributes: true,
+					attributeFilter: ['src']
+				});
+			};
+			if (document.documentElement) {
+				start();
+			} else {
+				document.addEventListener('DOMContentLoaded', start, { once: true });
+			}
+		}
+	})();`;
 }
 
 function getWebviewScript(): string {
@@ -2494,7 +2730,10 @@ const externalButton = document.getElementById('external-button');
 const devtoolsButton = document.getElementById('devtools-button');
 const backButton = document.getElementById('back-button');
 	const forwardButton = document.getElementById('forward-button');
-	const reloadButton = document.getElementById('reload-button');
+const reloadButton = document.getElementById('reload-button');
+	let bridgeToken = settings.proxyUrl
+		? new URL(settings.proxyUrl).searchParams.get('${PROXY_PAGE_TOKEN_QUERY}')
+		: undefined;
 	let currentUrl = settings.url || '';
 	let inspectMode = false;
 	let renderSequence = 0;
@@ -2509,7 +2748,9 @@ vscode.postMessage({ type: 'ready' });
 
 window.addEventListener('message', event => {
 	const data = event.data;
-	if (data && data.channel === 'smartPageTranslator.browser') {
+	if (data
+		&& data.channel === 'smartPageTranslator.browser'
+		&& event.source === frame.contentWindow) {
 		handlePageBridgeMessage(data.payload);
 		return;
 	}
@@ -2561,6 +2802,9 @@ externalButton.addEventListener('click', () => {
 		settings.mode = 'url';
 		settings.url = nextUrl;
 		settings.proxyUrl = payload ? payload.proxyUrl : undefined;
+		bridgeToken = settings.proxyUrl
+			? new URL(settings.proxyUrl).searchParams.get('${PROXY_PAGE_TOKEN_QUERY}')
+			: undefined;
 		currentUrl = nextUrl;
 		input.value = nextUrl;
 		document.title = payload && payload.title ? payload.title : '浏览 ' + nextUrl;
@@ -2595,36 +2839,13 @@ externalButton.addEventListener('click', () => {
 		}
 
 		frame.removeAttribute('src');
-		frame.srcdoc = buildStatusHtml('正在加载网页', normalized);
-
-		try {
-			const response = await fetch(settings.proxyUrl, { cache: 'no-store' });
-			const html = await response.text();
-			if (sequence !== renderSequence) {
-				return;
-			}
-			if (!response.ok) {
-				throw new Error('HTTP ' + response.status + ' ' + response.statusText + ': ' + html.slice(0, 300));
-			}
-
-			const loaded = waitForFrameLoad();
-			frame.srcdoc = html;
-			await loaded;
-			if (sequence !== renderSequence) {
-				return;
-			}
-			installFrameInspectMode(inspectMode);
-			vscode.postMessage({ type: 'navigated', url: normalized });
-		} catch (error) {
-			if (sequence !== renderSequence) {
-				return;
-			}
-			const loaded = waitForFrameLoad();
-			frame.srcdoc = buildStatusHtml('无法打开网页', errorMessage(error));
-			await loaded;
-			vscode.postMessage({ type: 'navigated', url: normalized });
-			notify('无法打开网页：' + errorMessage(error), 'error');
+		const loaded = waitForFrameLoad();
+		frame.srcdoc = buildProxyShellHtml(settings.proxyUrl, bridgeToken);
+		await loaded;
+		if (sequence !== renderSequence) {
+			return;
 		}
+		setInspectMode(inspectMode);
 	}
 
 	function waitForFrameLoad() {
@@ -2706,6 +2927,30 @@ function navigateHistory(delta) {
 		].join('');
 	}
 
+	function buildProxyShellHtml(proxyUrl, token) {
+		const shellSettings = JSON.stringify({ proxyUrl, token }).replace(/</g, '\\u003C');
+		return [
+			'<!doctype html>',
+			'<html><head><meta charset="UTF-8">',
+			'<style>html,body,#proxy-page{width:100%;height:100%;margin:0;border:0;overflow:hidden;background:#fff}</style>',
+			'</head><body>',
+			'<iframe id="proxy-page"></iframe>',
+			'<script>',
+			'const settings=' + shellSettings + ';',
+			'const proxyPage=document.getElementById("proxy-page");',
+			'window.addEventListener("message",event=>{',
+			' const data=event.data;',
+			' if(!data){return;}',
+			' if(event.source===proxyPage.contentWindow&&data.channel==="smartPageTranslator.browser"&&data.token===settings.token){window.parent.postMessage(data,"*");return;}',
+			' if(event.source===window.parent&&data.channel==="smartPageTranslator.browser.control"&&data.token===settings.token){window.parent.postMessage({channel:"smartPageTranslator.browser",token:settings.token,payload:{type:"controlAck",stage:"shell",controlType:data.type}},"*");proxyPage.contentWindow.postMessage(data,"*");}',
+			'});',
+			'window.parent.postMessage({channel:"smartPageTranslator.browser",token:settings.token,payload:{type:"shellReady"}},"*");',
+			'proxyPage.src=settings.proxyUrl;',
+			'<\\/script>',
+			'</body></html>'
+		].join('');
+	}
+
 function getBridgeSource() {
 	return ${JSON.stringify(getFrameBridgeSource())};
 }
@@ -2717,6 +2962,23 @@ function handlePageBridgeMessage(payload) {
 	if (payload.type === 'pageLog') {
 		const message = Array.isArray(payload.values) ? payload.values.join(' ') : '';
 		recordLog(payload.level || 'log', message, 'page');
+		return;
+	}
+	if (payload.type === 'controlAck') {
+		recordLog('info', 'Control ' + String(payload.controlType || '') + ' reached ' + String(payload.stage || ''), 'browser');
+		return;
+	}
+	if (payload.type === 'frameReady') {
+		if (!payload.topLevel) {
+			return;
+		}
+		currentUrl = normalizeUrl(payload.url || currentUrl);
+		input.value = currentUrl;
+		vscode.postMessage({ type: 'navigated', url: currentUrl });
+		return;
+	}
+	if (payload.type === 'shellReady') {
+		recordLog('info', 'Proxy relay shell ready', 'browser');
 		return;
 	}
 	if (payload.type === 'selectedElement') {
@@ -2733,6 +2995,15 @@ function handlePageBridgeMessage(payload) {
 function setInspectMode(enabled) {
 	inspectMode = enabled;
 	inspectButton.classList.toggle('active', enabled);
+	if (settings.mode === 'url' && settings.proxyUrl) {
+		frame.contentWindow.postMessage({
+			channel: 'smartPageTranslator.browser.control',
+			token: bridgeToken,
+			type: 'setInspectMode',
+			enabled
+		}, '*');
+		return;
+	}
 	if (installFrameInspectMode(enabled)) {
 		return;
 	}
@@ -2743,6 +3014,7 @@ function setInspectMode(enabled) {
 	try {
 		frame.contentWindow.postMessage({
 			channel: 'smartPageTranslator.browser.control',
+			token: bridgeToken,
 			type: 'setInspectMode',
 			enabled
 		}, '*');
@@ -2752,6 +3024,16 @@ function setInspectMode(enabled) {
 }
 
 function selectElementBySelector(selector, copyToClipboard) {
+	if (settings.mode === 'url' && settings.proxyUrl) {
+		frame.contentWindow.postMessage({
+			channel: 'smartPageTranslator.browser.control',
+			token: bridgeToken,
+			type: 'selectElementBySelector',
+			selector: String(selector || ''),
+			copyToClipboard
+		}, '*');
+		return;
+	}
 	if (selectElementInFrame(selector, copyToClipboard)) {
 		return;
 	}
@@ -2762,6 +3044,7 @@ function selectElementBySelector(selector, copyToClipboard) {
 	try {
 		frame.contentWindow.postMessage({
 			channel: 'smartPageTranslator.browser.control',
+			token: bridgeToken,
 			type: 'selectElementBySelector',
 			selector: String(selector || ''),
 			copyToClipboard

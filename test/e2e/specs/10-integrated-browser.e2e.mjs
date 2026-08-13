@@ -60,11 +60,11 @@ describe('Smart Page Translator integrated browser E2E', () => {
       const firstUrl = `${server.origin}/first`;
       const redirectUrl = `${server.origin}/client-redirect`;
       await executeCommandWithInput(COMMANDS.browser.openUrl, redirectUrl);
+      await waitForServerRequest(server, request => request.pathname === '/client-redirect', 'client redirect document');
+      await waitForServerRequest(server, request => request.pathname === '/first', '/first document');
       const firstState = await waitForBrowserState(firstUrl);
       assert.equal(firstState.active?.url, firstUrl);
       assert.equal(browserUrlPanels(firstState).length, 1);
-      await waitForServerRequest(server, request => request.pathname === '/first', '/first document');
-      await waitForServerRequest(server, request => request.pathname === '/client-redirect', 'client redirect document');
       await waitForServerRequest(server, request => (
         request.pathname === '/first' && request.cookie.includes('spt_session=e2e-session')
       ), 'document request with proxy session cookie');
@@ -80,17 +80,35 @@ describe('Smart Page Translator integrated browser E2E', () => {
       await waitForServerRequest(server, request => request.pathname === '/assets/pixel.svg', 'CSS image resource');
       await waitForServerRequest(server, request => request.pathname === '/assets/test-font.woff2', 'Vite-injected CSS font resource');
       await waitForServerRequest(server, request => (
+        request.pathname === '/iframe-confirmed'
+          && request.searchParams.get('text') === 'static-child-ready'
+      ), 'same-origin static iframe access');
+      await waitForServerRequest(server, request => (
         request.pathname === '/script-executed'
           && request.searchParams.get('from') === '/first'
           && request.searchParams.get('eval') === '42'
           && request.cookie.includes('spt_session=e2e-session')
       ), 'module script execution for /first');
+      await waitForServerRequest(server, request => (
+		request.pathname === '/frame-access-confirmed'
+		  && request.searchParams.get('kind') === 'static'
+		  && request.searchParams.get('path') === '/frame-child'
+	  ), 'same-origin static iframe access');
+	  await waitForServerRequest(server, request => (
+		request.pathname === '/frame-access-confirmed'
+		  && request.searchParams.get('kind') === 'dynamic'
+		  && request.searchParams.get('path') === '/frame-child'
+	  ), 'same-origin dynamic iframe access');
+	  await waitForServerRequest(server, request => request.pathname === '/picker-control-confirmed', 'iframe picker control');
+	  await waitForServerRequest(server, request => request.pathname === '/picker-click-triggered', 'iframe picker click');
+	  await browser.waitUntil(async () => {
+		const state = await readBrowserState();
+		return state.active?.recentLogs?.some(entry => entry.message === 'Synthetic child relay confirmed');
+	  }, { timeout: 10000, interval: 200, timeoutMsg: 'Child-frame bridge result did not relay to the outer Webview' });
 
-      await selectBrowserElementBySelector('#browser-http-e2e-message');
-      const selectedState = await waitForSelectedElement('#browser-http-e2e-message');
-      assert.equal(selectedState.active?.selectedElement?.tagName, 'h1');
-      assert.equal(selectedState.active?.selectedElement?.id, 'browser-http-e2e-message');
-      assert.match(selectedState.active?.selectedElement?.outerHTML || '', /HTTP fixture first/);
+      const selectedChildState = await waitForSelectedElement('#iframe-child-message');
+      assert.equal(selectedChildState.active?.selectedElement?.id, 'iframe-child-message');
+      assert.match(selectedChildState.active?.selectedElement?.text || '', /static-child-ready/);
     } finally {
       await closeStandaloneBrowser();
       await server.close();
@@ -198,6 +216,35 @@ async function startHttpFixtureServer() {
 		document.getElementById('browser-http-e2e-message').textContent = message;
         const evaluated = eval('21 * 2');
         fetch('/script-executed?from=' + encodeURIComponent(new URL(document.baseURI).pathname) + '&eval=' + evaluated, { cache: 'no-store' });
+        const reportFrame = (frame, endpoint) => {
+          const report = () => {
+            const href = frame.contentWindow.location.href;
+            const text = frame.contentDocument.getElementById('iframe-child-message').textContent;
+            fetch(endpoint + '?href=' + encodeURIComponent(href) + '&text=' + encodeURIComponent(text), { cache: 'no-store' });
+          };
+          if (frame.contentDocument && frame.contentDocument.readyState === 'complete') {
+            report();
+          } else {
+            frame.addEventListener('load', report, { once: true });
+          }
+        };
+        const pickerFrame = document.getElementById('static-child-frame');
+        reportFrame(pickerFrame, '/iframe-confirmed');
+        const exercisePicker = () => {
+          const token = window.__smartPageTranslatorProxy && window.__smartPageTranslatorProxy.sessionToken;
+          pickerFrame.contentWindow.postMessage({
+            channel: 'smartPageTranslator.browser.control',
+            token,
+            type: 'setInspectMode',
+            enabled: true
+          }, '*');
+          pickerFrame.contentWindow.postMessage({ type: 'trigger-e2e-picker-click' }, '*');
+        };
+        if (pickerFrame.contentDocument && pickerFrame.contentDocument.readyState === 'complete') {
+          exercisePicker();
+        } else {
+          pickerFrame.addEventListener('load', exercisePicker, { once: true });
+        }
       `);
       return;
     }
@@ -273,6 +320,63 @@ async function startHttpFixtureServer() {
       return;
     }
 
+    if (url.pathname === '/iframe-child' || url.pathname === '/iframe-dynamic') {
+      const label = url.pathname === '/iframe-child' ? 'static-child-ready' : 'dynamic-child-ready';
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end(`<!doctype html><html><body><button id="iframe-child-message">${label}</button><script>
+        window.addEventListener('message', event => {
+          if (event.data?.channel === 'smartPageTranslator.browser.control' && event.data?.type === 'setInspectMode') {
+            fetch('/picker-control-confirmed', { cache: 'no-store' });
+            if (event.data.enabled) {
+              setTimeout(() => {
+                fetch('/picker-click-triggered', { cache: 'no-store' });
+                document.getElementById('iframe-child-message').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+              }, 0);
+            }
+          }
+          if (event.data?.type === 'trigger-e2e-picker-click') {
+            const token = window.__smartPageTranslatorProxy && window.__smartPageTranslatorProxy.sessionToken;
+            window.parent.postMessage({
+              channel: 'smartPageTranslator.browser',
+              token,
+              payload: { type: 'pageLog', level: 'info', values: ['Synthetic child relay confirmed'] }
+            }, '*');
+          }
+        });
+      <\/script></body></html>`);
+      return;
+    }
+
+    if (url.pathname === '/iframe-confirmed' || url.pathname === '/dynamic-iframe-confirmed') {
+      response.writeHead(204, { 'cache-control': 'no-store' });
+      response.end();
+      return;
+    }
+
+    if (url.pathname === '/picker-control-confirmed' || url.pathname === '/picker-click-triggered') {
+      response.writeHead(204, { 'cache-control': 'no-store' });
+      response.end();
+      return;
+    }
+
+	if (url.pathname === '/frame-access-confirmed') {
+	  response.writeHead(204, { 'cache-control': 'no-store' });
+	  response.end();
+	  return;
+	}
+
+	if (url.pathname === '/frame-child') {
+	  response.writeHead(200, {
+		'content-type': 'text/html; charset=utf-8',
+		'cache-control': 'no-store'
+	  });
+	  response.end('<!doctype html><html><body><button id="nested-frame-target">Nested frame target</button></body></html>');
+	  return;
+	}
+
     if (url.pathname === '/client-redirect') {
       const address = server.address();
       const origin = address && typeof address !== 'string'
@@ -297,9 +401,24 @@ async function startHttpFixtureServer() {
 <head><meta charset="utf-8"><title>HTTP fixture ${route}</title><link rel="stylesheet" href="/styles/main.css"><script type="module">import { injectIntoGlobalHook } from '/@react-refresh'; injectIntoGlobalHook(window);</script></head>
 <body>
   <h1 id="browser-http-e2e-message">HTTP fixture ${route}</h1>
-  <script type="module" src="/@vite/client"></script>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
+  <iframe id="static-child-frame" src="/iframe-child"></iframe>
+	  <iframe id="static-frame" src="/frame-child"></iframe>
+	  <script type="module" src="/@vite/client"></script>
+	  <script type="module" src="/src/main.tsx"></script>
+	  <script>
+		const reportFrame = (kind, frame) => frame.addEventListener('load', () => {
+		  void frame.contentWindow.location.href;
+		  const path = new URL(frame.contentDocument.baseURI).pathname;
+		  fetch('/frame-access-confirmed?kind=' + kind + '&path=' + encodeURIComponent(path));
+		}, { once: true });
+		reportFrame('static', document.getElementById('static-frame'));
+		const dynamicFrame = document.createElement('iframe');
+		dynamicFrame.id = 'dynamic-frame';
+		reportFrame('dynamic', dynamicFrame);
+		dynamicFrame.src = '/frame-child';
+		document.body.appendChild(dynamicFrame);
+	  </script>
+	</body>
 </html>`);
   });
   const webSocketServer = new WebSocketServer({ noServer: true });
@@ -348,20 +467,24 @@ async function startHttpFixtureServer() {
 
 async function waitForBrowserState(expectedUrl) {
   let state;
-  await browser.waitUntil(async () => {
-    try {
-      state = await readBrowserState();
-      return state.active?.url === expectedUrl
-        && state.active?.webviewUrl === expectedUrl
-        && browserUrlPanels(state).length === 1;
-    } catch {
-      return false;
-    }
-  }, {
-    timeout: 20000,
-    interval: 300,
-    timeoutMsg: `Timed out waiting for browser URL ${expectedUrl}; last state ${JSON.stringify(state)}`
-  });
+  try {
+    await browser.waitUntil(async () => {
+      try {
+        state = await readBrowserState();
+        return state.active?.url === expectedUrl
+          && state.active?.webviewUrl === expectedUrl
+          && browserUrlPanels(state).length === 1;
+	  } catch (error) {
+	    state = { readError: String(error?.stack || error) };
+        return false;
+      }
+    }, {
+      timeout: 20000,
+      interval: 300
+    });
+  } catch (error) {
+    throw new Error(`Timed out waiting for browser URL ${expectedUrl}; last state ${JSON.stringify(state)}`, { cause: error });
+  }
   return state;
 }
 
@@ -369,15 +492,6 @@ async function readBrowserState() {
   return browser.executeWorkbench((vscode, command) => (
     vscode.commands.executeCommand(command)
   ), COMMANDS.internal.getBrowserState);
-}
-
-async function selectBrowserElementBySelector(selector) {
-  await browser.executeWorkbench(async (vscode, args) => {
-    await vscode.commands.executeCommand(args.command, args.selector, { copyToClipboard: false });
-  }, {
-    command: COMMANDS.internal.selectBrowserElementBySelector,
-    selector
-  });
 }
 
 async function closeStandaloneBrowser() {
@@ -408,14 +522,20 @@ function formatRequest(request) {
 
 async function waitForSelectedElement(selector) {
   let state;
-  await browser.waitUntil(async () => {
-    state = await readBrowserState();
-    return state.active?.selectedElement?.selector === selector
-      || state.active?.selectedElement?.id === selector.replace(/^#/, '');
-  }, {
-    timeout: 20000,
-    interval: 300,
-    timeoutMsg: `Timed out waiting for browser selected element ${selector}; last state ${JSON.stringify(state)}`
-  });
-  return state;
+  let readError;
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    try {
+      state = await readBrowserState();
+      readError = undefined;
+      if (state.active?.selectedElement?.selector === selector
+        || state.active?.selectedElement?.id === selector.replace(/^#/, '')) {
+        return state;
+      }
+    } catch (error) {
+      readError = String(error?.stack || error);
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  throw new Error(`Timed out waiting for browser selected element ${selector}; last state ${JSON.stringify({ state, readError })}`);
 }

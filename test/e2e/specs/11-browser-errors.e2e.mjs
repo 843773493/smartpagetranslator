@@ -10,38 +10,26 @@ describe('Smart Page Translator integrated browser error E2E', () => {
   beforeEach(setupWorkbench);
   afterEach(cleanupWorkbench);
 
-  it('renders a selectable error document when the target cannot be loaded', async () => {
+  it('keeps a proxied browser panel active when the target cannot be loaded', async () => {
     const unreachableUrl = 'http://127.0.0.1:1/';
     await executeCommandWithInput(COMMANDS.browser.openUrl, unreachableUrl);
 
     let state;
     await browser.waitUntil(async () => {
       state = await readBrowserState();
-      return state.active?.url === unreachableUrl;
+      return state.active?.url === unreachableUrl
+        && state.active?.webviewUrl === unreachableUrl
+        && state.active?.recentLogs?.some(entry => entry.message === 'Proxy relay shell ready');
     }, {
       timeout: 20000,
       interval: 300,
       timeoutMsg: `Timed out waiting for browser error document; last state ${JSON.stringify(state)}`
     });
 
-    await browser.executeWorkbench(async (vscode, args) => {
-      await vscode.commands.executeCommand(args.command, args.selector, { copyToClipboard: false });
-    }, {
-      command: COMMANDS.internal.selectBrowserElementBySelector,
-      selector: '#smart-page-translator-load-error'
-    });
-
-    await browser.waitUntil(async () => {
-      state = await readBrowserState();
-      return state.active?.selectedElement?.id === 'smart-page-translator-load-error';
-    }, {
-      timeout: 20000,
-      interval: 300,
-      timeoutMsg: `Timed out selecting browser error document; last state ${JSON.stringify(state)}`
-    });
-
-    assert.match(state.active?.selectedElement?.text || '', /网页加载失败/);
-    assert.match(state.active?.selectedElement?.outerHTML || '', /127\.0\.0\.1:1/);
+    assert.equal(state.active?.mode, 'url');
+    assert.equal(state.active?.webviewUrl, unreachableUrl);
+    assert.match(state.active?.proxyUrl || '', /^http:\/\/127\.0\.0\.1:\d+\//);
+    assert.ok(state.active?.recentLogs?.some(entry => entry.message === 'Proxy relay shell ready'));
   });
 });
 

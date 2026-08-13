@@ -13,6 +13,10 @@ import {
   setupWorkbench,
   workspacePath
 } from '../support/harness.mjs';
+import {
+  switchToFrameContainingSelector,
+  switchToTopFrame
+} from '../support/diagnostics.mjs';
 
 describe('Smart Page Translator HTML preview E2E', () => {
   beforeEach(setupWorkbench);
@@ -33,8 +37,8 @@ describe('Smart Page Translator HTML preview E2E', () => {
           commandRegistered: commands.includes(args.previewCommand),
           customEditorRegistered: customEditors.some((item) => item.viewType === args.customEditor),
           explorerMenuRegistered: explorerMenus.some((item) => item.command === args.previewCommand),
-          editorTitleMenuRegistered: editorTitleMenus.some((item) => item.command === args.previewCommand),
-          editorContextMenuRegistered: editorContextMenus.some((item) => item.command === args.previewCommand)
+          editorTitleMenu: editorTitleMenus.find((item) => item.command === args.previewCommand),
+          editorContextMenu: editorContextMenus.find((item) => item.command === args.previewCommand)
         };
       },
       {
@@ -46,8 +50,8 @@ describe('Smart Page Translator HTML preview E2E', () => {
     assert.equal(htmlContribution.commandRegistered, true);
     assert.equal(htmlContribution.customEditorRegistered, true);
     assert.equal(htmlContribution.explorerMenuRegistered, true);
-    assert.equal(htmlContribution.editorTitleMenuRegistered, true);
-    assert.equal(htmlContribution.editorContextMenuRegistered, true);
+    assert.equal(htmlContribution.editorTitleMenu?.group, '2_smartPageTranslator@1');
+    assert.equal(htmlContribution.editorContextMenu?.group, '2_smartPageTranslator@1');
 
     // TODO: 当前 WDIO executeWorkbench 调用 vscode.openWith 会触发 VS Code 测试窗口卸载，
     // 后续需要改用稳定的 UI 自动化路径验证 Open With 实际打开 Custom Editor。
@@ -69,6 +73,100 @@ describe('Smart Page Translator HTML preview E2E', () => {
     assert.match(selectedElementClipboard.text, /Smart Page Translator HTML 渲染成功/);
     assert.doesNotMatch(selectedElementClipboard.text, /区域截图|截图|已选元素\s*选择器/);
 
+    await switchToTopFrame();
+    assert.equal(await switchToFrameContainingSelector('#smart-page-translator-browser-toolbar'), true);
+    try {
+      const layout = await browser.execute(() => ({
+        bodyTransform: getComputedStyle(document.body).transform,
+        bodyPosition: getComputedStyle(document.body).position,
+        bodyMarginTop: getComputedStyle(document.body).marginTop,
+        bodyMarginBottom: getComputedStyle(document.body).marginBottom,
+        bodyOverflowX: getComputedStyle(document.body).overflowX,
+        bodyOverflowY: getComputedStyle(document.body).overflowY,
+        bodyRect: (() => {
+          const rect = document.body.getBoundingClientRect();
+          return {
+            top: Math.round(rect.top),
+            right: Math.round(rect.right),
+            bottom: Math.round(rect.bottom),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          };
+        })(),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        bodyScrollWidth: document.body.scrollWidth,
+        bodyClientWidth: document.body.clientWidth,
+        bodyScrollHeight: document.body.scrollHeight,
+        bodyClientHeight: document.body.clientHeight,
+        htmlOverflowX: getComputedStyle(document.documentElement).overflowX,
+        htmlOverflowY: getComputedStyle(document.documentElement).overflowY,
+        htmlScrollWidth: document.documentElement.scrollWidth,
+        htmlClientWidth: document.documentElement.clientWidth,
+        htmlScrollHeight: document.documentElement.scrollHeight,
+        htmlClientHeight: document.documentElement.clientHeight
+      }));
+      assert.equal(layout.bodyTransform, 'none');
+      assert.equal(layout.bodyPosition, 'fixed');
+      assert.equal(layout.bodyMarginTop, '0px');
+      assert.equal(layout.bodyMarginBottom, '0px');
+      assert.equal(layout.bodyOverflowX, 'auto');
+      assert.equal(layout.bodyOverflowY, 'auto');
+      assert.equal(layout.bodyRect.top, 37);
+      assert.equal(layout.bodyRect.right, layout.viewportWidth);
+      assert.equal(layout.bodyRect.bottom, layout.viewportHeight);
+      assert.equal(layout.bodyRect.height, layout.viewportHeight - 37);
+      assert.ok(layout.bodyScrollWidth <= layout.bodyClientWidth);
+      assert.ok(layout.bodyScrollHeight >= layout.bodyClientHeight);
+      assert.equal(layout.htmlOverflowX, 'hidden');
+      assert.equal(layout.htmlOverflowY, 'hidden');
+      assert.ok(layout.htmlScrollWidth <= layout.htmlClientWidth);
+      assert.ok(layout.htmlScrollHeight <= layout.htmlClientHeight);
+
+      const zoomResult = await browser.execute(() => {
+        const event = new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          deltaY: -100
+        });
+        window.dispatchEvent(event);
+        return {
+          defaultPrevented: event.defaultPrevented,
+          zoom: document.body.style.zoom
+        };
+      });
+      assert.equal(zoomResult.defaultPrevented, true);
+      assert.equal(zoomResult.zoom, '1.1');
+
+      const horizontalScroll = await browser.execute(() => {
+        const probe = document.createElement('div');
+        probe.id = 'spt-horizontal-scroll-probe';
+        probe.style.width = '1400px';
+        probe.style.height = '1px';
+        probe.style.pointerEvents = 'none';
+        document.body.appendChild(probe);
+        const result = {
+          overflowX: getComputedStyle(document.body).overflowX,
+          scrollWidth: document.body.scrollWidth,
+          clientWidth: document.body.clientWidth
+        };
+        document.body.scrollLeft = document.body.scrollWidth;
+        result.scrollLeft = document.body.scrollLeft;
+        probe.remove();
+        document.body.scrollLeft = 0;
+        return result;
+      });
+      assert.equal(horizontalScroll.overflowX, 'auto');
+      assert.ok(horizontalScroll.scrollWidth > horizontalScroll.clientWidth);
+      assert.ok(horizontalScroll.scrollLeft > 0);
+    } finally {
+      await browser.execute(() => {
+        document.body.style.zoom = '';
+      });
+      await switchToTopFrame();
+    }
+
     const logsClipboard = await browser.executeWorkbench(
       async (vscode, args) => {
         const copied = await vscode.commands.executeCommand(args.command);
@@ -85,6 +183,10 @@ describe('Smart Page Translator HTML preview E2E', () => {
     const logs = JSON.parse(logsClipboard.text);
     assert.equal(logsClipboard.clipboardEqualsCommandResult, true);
     assert.equal(Array.isArray(logs), true);
+    assert.equal(
+      logs.some((entry) => entry.message.includes("Identifier 'notify' has already been declared")),
+      false
+    );
     assert.equal(logs.some((entry) => entry.message.includes('HTML 预览 fixture 日志')), true);
     assert.equal(fs.existsSync(oldExportDir), false);
   });
