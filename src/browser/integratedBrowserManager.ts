@@ -9,7 +9,7 @@ import { basenameOfUri, displayPathOfUri, isHtmlUri, parentUriOf } from '../file
 
 const HTML_PREVIEW_EDITOR_VIEW_TYPE = 'smartPageTranslator.htmlPreview';
 const BROWSER_VIEW_TYPE = 'smartPageTranslator.browser';
-const STANDALONE_BROWSER_KEY = 'standalone-browser';
+const STANDALONE_BROWSER_KEY_PREFIX = 'standalone-browser:';
 const PROXY_PAGE_TOKEN_QUERY = '__smartPageTranslatorProxyToken';
 const CONFIG_SECTION = 'smartPageTranslator.browser';
 
@@ -27,19 +27,34 @@ type ElementSnapshot = {
 	readonly tagName: string;
 	readonly id?: string;
 	readonly className?: string;
+	readonly role?: string;
+	readonly ariaLabel?: string;
+	readonly title?: string;
+	readonly testId?: string;
 	readonly text?: string;
 	readonly selector: string;
 	readonly outerHTML?: string;
+	readonly url?: string;
 	readonly rect: {
 		readonly x: number;
 		readonly y: number;
 		readonly width: number;
 		readonly height: number;
 	};
+	readonly css?: ElementCssSnapshot;
+};
+
+type ElementCssSnapshot = {
+	readonly matchedRules: readonly string[];
+	readonly inheritedRules: readonly string[];
+	readonly resolvedValues: Readonly<Record<string, string>>;
+	readonly variables: Readonly<Record<string, string>>;
+	readonly warnings: readonly string[];
 };
 
 type BrowserSelectionOptions = {
 	readonly copyToClipboard?: boolean;
+	readonly verifyHighlightOverlay?: boolean;
 };
 
 type StoredProxyCookie = {
@@ -67,7 +82,12 @@ type BrowserInput = {
 type WebviewToExtensionMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'log'; readonly entry: BrowserLogEntry }
-	| { readonly type: 'selectedElement'; readonly element: ElementSnapshot; readonly copyToClipboard?: boolean }
+	| {
+		readonly type: 'selectedElement';
+		readonly element: ElementSnapshot;
+		readonly copyToClipboard?: boolean;
+		readonly fullContext?: boolean;
+	}
 	| { readonly type: 'exportLogs' }
 	| { readonly type: 'navigated'; readonly url: string }
 	| { readonly type: 'navigateToUrl'; readonly url: string }
@@ -77,8 +97,13 @@ type WebviewToExtensionMessage =
 
 type ExtensionToWebviewMessage =
 	| { readonly type: 'showToast'; readonly message: string; readonly severity?: 'info' | 'warning' | 'error' }
-	| { readonly type: 'setInspectMode'; readonly enabled: boolean }
-	| { readonly type: 'selectElementBySelector'; readonly selector: string; readonly copyToClipboard?: boolean }
+	| { readonly type: 'setInspectMode'; readonly enabled: boolean; readonly mode?: 'basic' | 'full' }
+	| {
+		readonly type: 'selectElementBySelector';
+		readonly selector: string;
+		readonly copyToClipboard?: boolean;
+		readonly verifyHighlightOverlay?: boolean;
+	}
 	| {
 		readonly type: 'loadUrl';
 		readonly url: string;
@@ -162,13 +187,14 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		this.open(this.createHtmlInput(uri, html, uri.toString()));
 	}
 
-	public async openUrl(rawUrl?: string): Promise<void> {
+	public async openUrl(rawUrl?: string, panelKey?: string): Promise<void> {
 		const url = rawUrl || await this.askUrl();
 		if (!url) {
 			return;
 		}
 
 		const normalized = normalizeBrowserUrl(url);
+		const key = panelKey || createStandaloneBrowserKey();
 		let proxyUrl: string | undefined;
 		if (isHttpUrl(normalized)) {
 			try {
@@ -177,7 +203,7 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 				const message = formatUnknownError(error);
 				void vscode.window.showErrorMessage(`网页加载失败：${message}`);
 				this.open({
-					key: STANDALONE_BROWSER_KEY,
+					key,
 					title: `加载失败 ${normalized}`,
 					mode: 'url',
 					url: normalized,
@@ -188,7 +214,7 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 			}
 		}
 		this.open({
-			key: STANDALONE_BROWSER_KEY,
+			key,
 			title: `浏览 ${normalized}`,
 			mode: 'url',
 			url: normalized,
@@ -217,6 +243,11 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 		view.selectElementBySelector(selector, options);
 	}
 
+	public getSelectedElementContext(): string | undefined {
+		const view = this.requireActiveView();
+		return view.getSelectedElementContext();
+	}
+
 	public getDebugState(): BrowserDebugState {
 		const panels = Array.from(this.panels.entries()).map(([key, view]) => view.getDebugState(key));
 		return {
@@ -228,7 +259,11 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 	}
 
 	public closeStandaloneBrowser(): void {
-		this.panels.get(STANDALONE_BROWSER_KEY)?.dispose();
+		for (const [key, view] of this.panels.entries()) {
+			if (isStandaloneBrowserKey(key)) {
+				view.dispose();
+			}
+		}
 	}
 
 	public attachHtmlPreviewEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): void {
@@ -247,13 +282,9 @@ export class IntegratedBrowserManager implements vscode.Disposable {
 	private open(input: BrowserInput): void {
 		const existing = this.panels.get(input.key);
 		if (existing) {
-			if (input.key === STANDALONE_BROWSER_KEY && input.mode === 'url') {
-				existing.dispose();
-			} else {
-				existing.show(input);
-				this.activeView = existing;
-				return;
-			}
+			existing.show(input);
+			this.activeView = existing;
+			return;
 		}
 
 		const view = IntegratedBrowserView.create(this.context, input, this.urlProxy);
@@ -336,8 +367,8 @@ export function registerIntegratedBrowserCommands(
 	browser: IntegratedBrowserManager
 ): void {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('smartPageTranslator.browser.openUrl', async (url?: string) => {
-			await browser.openUrl(url);
+		vscode.commands.registerCommand('smartPageTranslator.browser.openUrl', async (url?: string, panelKey?: string) => {
+			await browser.openUrl(url, panelKey);
 		})
 	);
 
@@ -377,6 +408,12 @@ export function registerIntegratedBrowserCommands(
 				throw new Error('selectBrowserElementBySelector 需要非空 CSS selector。');
 			}
 			browser.selectElementBySelector(selector, options);
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.internal.getSelectedBrowserElementContext', () => {
+			return browser.getSelectedElementContext();
 		})
 	);
 }
@@ -884,6 +921,9 @@ class IntegratedBrowserView implements vscode.Disposable {
 
 	private readonly logs: BrowserLogEntry[] = [];
 	private selectedElement: ElementSnapshot | undefined;
+	private pendingElementSelection: Extract<ExtensionToWebviewMessage, { readonly type: 'selectElementBySelector' }> | undefined;
+	private elementSelectionRequestSequence = 0;
+	private webviewReady = false;
 	private disposed = false;
 	private currentInput: BrowserInput;
 	private hasRendered = false;
@@ -952,6 +992,8 @@ class IntegratedBrowserView implements vscode.Disposable {
 		this.currentInput = input;
 		this.lastWebviewUrl = undefined;
 		this.selectedElement = undefined;
+		this.pendingElementSelection = undefined;
+		this.elementSelectionRequestSequence += 1;
 		this.panel.title = input.title;
 		if (canUpdateUrlInPlace) {
 			this.postMessage({
@@ -966,6 +1008,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 			return;
 		}
 		this.panel.webview.options = resolveWebviewOptions(this.context, input);
+		this.webviewReady = false;
 		this.panel.webview.html = this.renderHtml(input);
 		this.hasRendered = true;
 		if (this.revealOnShow && !this.panel.visible) {
@@ -994,16 +1037,33 @@ class IntegratedBrowserView implements vscode.Disposable {
 	}
 
 	public selectElementBySelector(selector: string, options?: BrowserSelectionOptions): void {
+		if (elementSnapshotMatchesSelector(this.selectedElement, selector)) {
+			return;
+		}
+		if (this.pendingElementSelection?.selector === selector
+			&& this.pendingElementSelection.copyToClipboard === options?.copyToClipboard
+			&& this.pendingElementSelection.verifyHighlightOverlay === options?.verifyHighlightOverlay) {
+			return;
+		}
 		this.selectedElement = undefined;
 		const message: ExtensionToWebviewMessage = {
 			type: 'selectElementBySelector',
 			selector,
-			copyToClipboard: options?.copyToClipboard
+			copyToClipboard: options?.copyToClipboard,
+			verifyHighlightOverlay: options?.verifyHighlightOverlay
 		};
-		this.postMessage(message);
-		for (const delay of [150, 450]) {
+		this.pendingElementSelection = message;
+		const requestSequence = ++this.elementSelectionRequestSequence;
+		if (this.webviewReady) {
+			this.postMessage(message);
+		}
+		for (const delay of [500, 1500]) {
 			setTimeout(() => {
-				if (!this.disposed && !elementSnapshotMatchesSelector(this.selectedElement, selector)) {
+				if (!this.disposed
+					&& this.webviewReady
+					&& requestSequence === this.elementSelectionRequestSequence
+					&& this.pendingElementSelection === message
+					&& !elementSnapshotMatchesSelector(this.selectedElement, selector)) {
 					this.postMessage(message);
 				}
 			}, delay);
@@ -1040,6 +1100,10 @@ class IntegratedBrowserView implements vscode.Disposable {
 
 		switch (message.type) {
 			case 'ready':
+				this.webviewReady = true;
+				if (this.pendingElementSelection) {
+					this.postMessage(this.pendingElementSelection);
+				}
 				break;
 			case 'log':
 				this.logs.push(message.entry);
@@ -1049,8 +1113,13 @@ class IntegratedBrowserView implements vscode.Disposable {
 				break;
 			case 'selectedElement':
 				this.selectedElement = message.element;
+				if (this.pendingElementSelection
+					&& elementSnapshotMatchesSelector(message.element, this.pendingElementSelection.selector)) {
+					this.pendingElementSelection = undefined;
+					this.elementSelectionRequestSequence += 1;
+				}
 				if (message.copyToClipboard !== false) {
-					await this.copySelectedElementToClipboard(message.element);
+					await this.copyElementToClipboard(message.element, message.fullContext === true);
 				}
 				break;
 			case 'exportLogs':
@@ -1067,7 +1136,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 				};
 				break;
 			case 'navigateToUrl':
-				await vscode.commands.executeCommand('smartPageTranslator.browser.openUrl', message.url);
+				await vscode.commands.executeCommand('smartPageTranslator.browser.openUrl', message.url, this.currentInput.key);
 				break;
 			case 'openExternal':
 				await vscode.env.openExternal(vscode.Uri.parse(message.url));
@@ -1081,9 +1150,18 @@ class IntegratedBrowserView implements vscode.Disposable {
 		}
 	}
 
-	private async copySelectedElementToClipboard(element: ElementSnapshot): Promise<void> {
-		await vscode.env.clipboard.writeText(formatElementForCopilotClipboard(element));
-		this.showToast('元素内容已复制到剪贴板。');
+	private async copyElementToClipboard(element: ElementSnapshot, fullContext: boolean): Promise<void> {
+		const clipboardText = fullContext
+			? formatFullElementForCopilotClipboard(element)
+			: formatElementForCopilotClipboard(element);
+		await vscode.env.clipboard.writeText(clipboardText);
+		this.showToast(fullContext ? '完整元素上下文已复制到剪贴板。' : '元素内容已复制到剪贴板。');
+	}
+
+	public getSelectedElementContext(): string | undefined {
+		return this.selectedElement
+			? formatFullElementForCopilotClipboard(this.selectedElement)
+			: undefined;
 	}
 
 	private showToast(message: string, severity: 'info' | 'warning' | 'error' = 'info'): void {
@@ -1143,6 +1221,7 @@ class IntegratedBrowserView implements vscode.Disposable {
 		<input id="url-input" class="url-input" type="text" aria-label="URL">
 		<nav class="button-group" aria-label="工具">
 			<button type="button" class="text-button" id="inspect-button" title="选中页面元素">选择元素</button>
+			<button type="button" class="text-button" id="inspect-plus-button" title="选中页面元素并复制完整上下文">选择元素+</button>
 			<button type="button" class="text-button" id="logs-button" title="复制浏览器日志">日志</button>
 			<button type="button" class="icon-button" id="external-button" title="在外部浏览器打开">↗</button>
 			<button type="button" class="text-button" id="devtools-button" title="打开 Webview 开发人员工具">DevTools</button>
@@ -1156,6 +1235,14 @@ class IntegratedBrowserView implements vscode.Disposable {
 	</body>
 </html>`;
 	}
+}
+
+function createStandaloneBrowserKey(): string {
+	return `${STANDALONE_BROWSER_KEY_PREFIX}${randomUUID()}`;
+}
+
+function isStandaloneBrowserKey(key: string): boolean {
+	return key.startsWith(STANDALONE_BROWSER_KEY_PREFIX);
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -1373,7 +1460,7 @@ function rewriteJavaScriptResourceUrls(source: string, targetUrl: string, resour
 
 function rewriteCssResourceUrls(source: string, targetUrl: string, resourceBaseUrl: string): string {
 	let rewritten = source.replace(
-		/(url\(\s*)(['"]?)([^'"\)]+)\2(\s*\))/gi,
+		/(url\(\s*)(['"]?)([^'")]+)\2(\s*\))/gi,
 		(_match, prefix: string, quote: string, resource: string, suffix: string) => (
 			`${prefix}${quote}${resolveProxiedResourceUrl(resource, targetUrl, resourceBaseUrl)}${quote}${suffix}`
 		)
@@ -1743,8 +1830,507 @@ function formatElementForCopilotClipboard(element: ElementSnapshot): string {
 	return element.outerHTML || JSON.stringify(element, null, 2);
 }
 
+function formatFullElementForCopilotClipboard(element: ElementSnapshot): string {
+	const classes = (element.className || '')
+		.split(/\s+/)
+		.filter(name => name && name !== 'spt-browser-hover-outline')
+		.map(name => `.${name}`)
+		.join('');
+	const css = element.css;
+	const lines = [
+		'Attached Element Context from Integrated Browser',
+		'',
+		`Element: ${element.tagName}${classes}`,
+		'',
+		`URL: ${element.url || '未知'}`,
+		'',
+		`HTML Path: ${element.selector}`,
+		'',
+		'Outer HTML:',
+		'```html',
+		sanitizeMarkdownFence(element.outerHTML || ''),
+		'```',
+		'',
+		'Dimensions:',
+		`- top: ${element.rect.y}px`,
+		`- left: ${element.rect.x}px`,
+		`- width: ${element.rect.width}px`,
+		`- height: ${element.rect.height}px`,
+		'',
+		'CSS:',
+		'```css'
+	];
+
+	if (css) {
+		lines.push(...css.matchedRules);
+		if (css.inheritedRules.length) {
+			lines.push('', '/* Inherited */', ...css.inheritedRules);
+		}
+		if (Object.keys(css.resolvedValues).length) {
+			lines.push('', '/* Resolved values */');
+			for (const [property, value] of Object.entries(css.resolvedValues)) {
+				lines.push(`${property}: ${value};`);
+			}
+		}
+		if (Object.keys(css.variables).length) {
+			lines.push('', '/* CSS variables */');
+			for (const [property, value] of Object.entries(css.variables)) {
+				lines.push(`${property}: ${value};`);
+			}
+		}
+	} else {
+		lines.push('/* 当前页面未提供样式上下文。 */');
+	}
+
+	lines.push('```');
+	return lines.join('\n');
+}
+
+function sanitizeMarkdownFence(value: string): string {
+	return value.replace(/```/g, '` ` `');
+}
+
+function getElementContextScript(): string {
+	return `
+function getInspectableElement(element) {
+	if (!element || element.nodeType !== 1) {
+		return element;
+	}
+	return element.closest('button,a,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="tab"]') || element;
+}
+
+function getCleanOuterHTML(element) {
+	const clone = element.cloneNode(true);
+	if (clone && clone.nodeType === 1) {
+		clone.classList.remove('spt-browser-hover-outline');
+		clone.querySelectorAll('[class~="spt-browser-hover-outline"]').forEach(node => node.classList.remove('spt-browser-hover-outline'));
+	}
+	return clone.outerHTML || '';
+}
+
+/*
+ * 元素 CSS 上下文的筛选、继承属性和变量处理参考 VS Code 的 MIT 实现：
+ * reference_repo/vscode/src/vs/platform/browserView/common/cssHelpers.ts
+ * Copyright (c) Microsoft Corporation. 保留本项目自身的 Webview 桥接实现。
+ */
+function getElementCssContext(element) {
+	const doc = element.ownerDocument || document;
+	const view = doc.defaultView || window;
+	const computed = view.getComputedStyle(element);
+	const matchedRules = [];
+	const inheritedRules = [];
+	const warnings = [];
+	const seenCssTexts = new Set();
+	const seenWarnings = new Set();
+	const referencedVariables = new Set();
+	const authoredProperties = new Set(['display', 'height', 'width']);
+	const inheritableProperties = new Set([
+		'color',
+		'cursor',
+		'direction',
+		'font',
+		'font-family',
+		'font-feature-settings',
+		'font-kerning',
+		'font-size',
+		'font-size-adjust',
+		'font-stretch',
+		'font-style',
+		'font-variant',
+		'font-weight',
+		'letter-spacing',
+		'line-height',
+		'list-style',
+		'list-style-image',
+		'list-style-position',
+		'list-style-type',
+		'orphans',
+		'overflow-wrap',
+		'quotes',
+		'tab-size',
+		'text-align',
+		'text-align-last',
+		'text-indent',
+		'text-transform',
+		'visibility',
+		'white-space',
+		'widows',
+		'word-break',
+		'word-spacing',
+		'writing-mode'
+	]);
+
+	const addWarning = message => {
+		if (!seenWarnings.has(message)) {
+			seenWarnings.add(message);
+			warnings.push(message);
+		}
+	};
+	const collectVarReferences = value => {
+		for (const match of value.matchAll(/var\\(\\s*(--[a-zA-Z0-9_-]+)/g)) {
+			referencedVariables.add(match[1]);
+		}
+	};
+	const collectPropertyNames = (style, inheritedOnly) => {
+		if (!style) {
+			return;
+		}
+		for (let index = 0; index < style.length; index += 1) {
+			const property = style[index];
+			if (!property.startsWith('--') && (!inheritedOnly || inheritableProperties.has(property))) {
+				authoredProperties.add(property);
+			}
+		}
+	};
+	const filterInheritableDeclarations = style => {
+		if (!style) {
+			return '';
+		}
+		const declarations = [];
+		for (let index = 0; index < style.length; index += 1) {
+			const property = style[index];
+			if (!inheritableProperties.has(property)) {
+				continue;
+			}
+			const value = style.getPropertyValue(property).trim();
+			if (!value) {
+				continue;
+			}
+			const priority = style.getPropertyPriority(property);
+			declarations.push(property + ': ' + value + (priority ? ' !' + priority : ''));
+		}
+		return declarations.join('; ');
+	};
+	const addRule = (rule, target, output, inheritedOnly) => {
+		if (!rule || !rule.selectorText) {
+			return;
+		}
+		let matches = false;
+		try {
+			matches = target.matches(rule.selectorText);
+		} catch {
+			return;
+		}
+		if (!matches) {
+			return;
+		}
+		const rawCssText = rule.style && rule.style.cssText ? rule.style.cssText.trim() : '';
+		const cssText = inheritedOnly ? filterInheritableDeclarations(rule.style) : rawCssText;
+		if (!cssText) {
+			return;
+		}
+		collectPropertyNames(rule.style, inheritedOnly);
+		collectVarReferences(cssText);
+		if (!seenCssTexts.has(cssText)) {
+			seenCssTexts.add(cssText);
+			output.push(rule.selectorText + ' { ' + cssText + ' }');
+		}
+	};
+	const visitRules = (rules, target, output, inheritedOnly) => {
+		for (const rule of rules || []) {
+			if (rule.selectorText) {
+				addRule(rule, target, output, inheritedOnly);
+			} else if (rule.cssRules) {
+				visitRules(rule.cssRules, target, output, inheritedOnly);
+			}
+		}
+	};
+	const scanStyleSheets = (target, output, inheritedOnly) => {
+		for (const sheet of doc.styleSheets) {
+			if (sheet.ownerNode && sheet.ownerNode.id === 'smart-page-translator-browser-style') {
+				continue;
+			}
+			try {
+				visitRules(sheet.cssRules, target, output, inheritedOnly);
+			} catch {
+				addWarning('无法读取跨域样式表的 CSS 规则。');
+			}
+		}
+	};
+
+	if (element.style && element.style.cssText.trim()) {
+		const inlineCssText = element.style.cssText.trim();
+		collectPropertyNames(element.style, false);
+		collectVarReferences(inlineCssText);
+		matchedRules.push('element { ' + inlineCssText + ' }');
+	}
+	scanStyleSheets(element, matchedRules, false);
+	let parent = element.parentElement;
+	while (parent && parent !== doc.documentElement) {
+		scanStyleSheets(parent, inheritedRules, true);
+		parent = parent.parentElement;
+	}
+	scanStyleSheets(doc.documentElement, inheritedRules, true);
+
+	// TODO: 当前 Webview DOM 无法像 CDP CSS.getMatchedStylesForNode 一样读取伪元素匹配规则。
+	const variables = {};
+	const resolvedEntries = new Map();
+	for (let index = 0; index < computed.length; index += 1) {
+		const property = computed[index];
+		const value = computed.getPropertyValue(property).trim();
+		if (!value) {
+			continue;
+		}
+		if (property.startsWith('--') && referencedVariables.has(property)) {
+			variables[property] = value;
+		} else if (!property.startsWith('--') && authoredProperties.has(property)) {
+			resolvedEntries.set(property, value);
+		}
+	}
+
+	// TODO: 当前 Webview DOM 无法像 VS Code 的 CDP CSS 域一样读取 UA matched rules，无法可靠标注 /*UA*/。
+	// 因此仅保留 VS Code 明确始终展示的 display、height、width，以及作者样式实际设置的属性。
+	const collapseBoxValues = (propertyName, sides) => {
+		const values = sides.map(property => resolvedEntries.get(property));
+		if (values.some(value => value === undefined)) {
+			return;
+		}
+		sides.forEach(property => resolvedEntries.delete(property));
+		if (values.every(value => value === values[0])) {
+			resolvedEntries.set(propertyName, values[0]);
+		} else if (values[0] === values[2] && values[1] === values[3]) {
+			resolvedEntries.set(propertyName, values[0] + ' ' + values[1]);
+		} else if (values[1] === values[3]) {
+			resolvedEntries.set(propertyName, values[0] + ' ' + values[1] + ' ' + values[2]);
+		} else {
+			resolvedEntries.set(propertyName, values.join(' '));
+		}
+	};
+	collapseBoxValues('margin', ['margin-top', 'margin-right', 'margin-bottom', 'margin-left']);
+	collapseBoxValues('padding', ['padding-top', 'padding-right', 'padding-bottom', 'padding-left']);
+	const resolvedValues = {};
+	for (const [property, value] of Array.from(resolvedEntries.entries()).sort(([left], [right]) => left.localeCompare(right))) {
+		resolvedValues[property] = value;
+	}
+
+	return { matchedRules, inheritedRules, resolvedValues, variables, warnings };
+}
+
+function getElementContextUrl(element, fallbackUrl) {
+	const proxy = window.__smartPageTranslatorProxy;
+	return (proxy && proxy.targetUrl) || fallbackUrl || element.ownerDocument?.defaultView?.location?.href || location.href;
+}
+`;
+}
+
 function formatLogsForCopilotClipboard(logs: readonly BrowserLogEntry[]): string {
 	return JSON.stringify(logs, null, 2);
+}
+
+function getElementHighlightOverlayRuntimeSource(): string {
+	return `
+function createSmartPageTranslatorElementHighlight(doc) {
+	const overlayId = 'smart-page-translator-element-highlight';
+	const view = doc.defaultView || window;
+	let targetElement;
+	let overlayElement;
+	let resizeObserver;
+	let trackingTimer;
+	let lastGeometryKey;
+	let rootZoom = 1;
+
+	const setImportantStyle = (element, property, value) => {
+		element.style.setProperty(property, value, 'important');
+	};
+	const ensureOverlay = () => {
+		const existing = doc.getElementById(overlayId);
+		let created = false;
+		if (existing && existing.dataset.smartPageTranslatorElementHighlight === 'true') {
+			overlayElement = existing;
+		} else {
+			existing?.remove();
+			overlayElement = doc.createElement('div');
+			overlayElement.id = overlayId;
+			overlayElement.dataset.smartPageTranslatorElementHighlight = 'true';
+			overlayElement.dataset.visible = 'false';
+			overlayElement.setAttribute('aria-hidden', 'true');
+			created = true;
+		}
+		if (created) {
+			setImportantStyle(overlayElement, 'all', 'initial');
+			setImportantStyle(overlayElement, 'position', 'fixed');
+			setImportantStyle(overlayElement, 'z-index', '2147483647');
+			setImportantStyle(overlayElement, 'display', 'none');
+			setImportantStyle(overlayElement, 'box-sizing', 'border-box');
+			setImportantStyle(overlayElement, 'margin', '0');
+			setImportantStyle(overlayElement, 'padding', '0');
+			setImportantStyle(overlayElement, 'border', '2px solid var(--vscode-focusBorder, #4da3ff)');
+			setImportantStyle(overlayElement, 'border-radius', '0');
+			setImportantStyle(overlayElement, 'background', 'transparent');
+			setImportantStyle(overlayElement, 'box-shadow', 'none');
+			setImportantStyle(overlayElement, 'opacity', '1');
+			setImportantStyle(overlayElement, 'visibility', 'visible');
+			setImportantStyle(overlayElement, 'pointer-events', 'none');
+			setImportantStyle(overlayElement, 'transform', 'none');
+			setImportantStyle(overlayElement, 'zoom', String(1 / rootZoom));
+			setImportantStyle(overlayElement, 'transition', 'none');
+			setImportantStyle(overlayElement, 'animation', 'none');
+			setImportantStyle(overlayElement, 'contain', 'strict');
+			setImportantStyle(overlayElement, 'clip', 'auto');
+			setImportantStyle(overlayElement, 'clip-path', 'none');
+		}
+		if (doc.documentElement && overlayElement.parentElement !== doc.documentElement) {
+			doc.documentElement.appendChild(overlayElement);
+		}
+		setImportantStyle(overlayElement, 'zoom', String(1 / rootZoom));
+		return overlayElement;
+	};
+	const hideOverlay = () => {
+		lastGeometryKey = undefined;
+		if (!overlayElement) {
+			return;
+		}
+		overlayElement.dataset.visible = 'false';
+		setImportantStyle(overlayElement, 'display', 'none');
+	};
+	const measureOverlayCoordinateSpace = (overlay) => {
+		setImportantStyle(overlay, 'zoom', String(1 / rootZoom));
+		setImportantStyle(overlay, 'left', '0');
+		setImportantStyle(overlay, 'top', '0');
+		setImportantStyle(overlay, 'width', '100px');
+		setImportantStyle(overlay, 'height', '100px');
+		setImportantStyle(overlay, 'border', '0');
+		setImportantStyle(overlay, 'display', 'block');
+		setImportantStyle(overlay, 'visibility', 'hidden');
+		const rect = overlay.getBoundingClientRect();
+		const scaleX = rect.width / 100;
+		const scaleY = rect.height / 100;
+		return {
+			originX: Number.isFinite(rect.left) ? rect.left : 0,
+			originY: Number.isFinite(rect.top) ? rect.top : 0,
+			scaleX: Number.isFinite(scaleX) && scaleX > 0 ? scaleX : 1,
+			scaleY: Number.isFinite(scaleY) && scaleY > 0 ? scaleY : 1
+		};
+	};
+	const update = () => {
+		if (!targetElement || !targetElement.isConnected || !doc.documentElement) {
+			hideOverlay();
+			return;
+		}
+		const computedRootZoom = Number.parseFloat(doc.documentElement.style.zoom)
+			|| Number.parseFloat(view.getComputedStyle(doc.documentElement).zoom);
+		rootZoom = Number.isFinite(computedRootZoom) && computedRootZoom > 0 ? computedRootZoom : 1;
+		const rect = targetElement.getBoundingClientRect();
+		const viewport = view.visualViewport;
+		const viewportLeft = Math.max(0, viewport?.offsetLeft || 0);
+		const viewportTop = Math.max(0, viewport?.offsetTop || 0);
+		const viewportRight = viewportLeft + Math.max(0, viewport?.width || view.innerWidth || doc.documentElement.clientWidth);
+		const viewportBottom = viewportTop + Math.max(0, viewport?.height || view.innerHeight || doc.documentElement.clientHeight);
+		const visibleLeft = Math.max(viewportLeft, Math.min(viewportRight, rect.left));
+		const visibleTop = Math.max(viewportTop, Math.min(viewportBottom, rect.top));
+		const visibleRight = Math.max(viewportLeft, Math.min(viewportRight, rect.right));
+		const visibleBottom = Math.max(viewportTop, Math.min(viewportBottom, rect.bottom));
+		if (![visibleLeft, visibleTop, visibleRight, visibleBottom].every(Number.isFinite)
+			|| visibleRight <= visibleLeft
+			|| visibleBottom <= visibleTop) {
+			hideOverlay();
+			return;
+		}
+		const geometryKey = [
+			rootZoom,
+			visibleLeft,
+			visibleTop,
+			visibleRight,
+			visibleBottom,
+			viewportLeft,
+			viewportTop,
+			viewportRight,
+			viewportBottom
+		].join('|');
+		if (geometryKey === lastGeometryKey
+			&& overlayElement?.isConnected
+			&& overlayElement.dataset.visible === 'true') {
+			return;
+		}
+		const overlay = ensureOverlay();
+		setImportantStyle(overlay, 'zoom', String(1 / rootZoom));
+		const coordinates = measureOverlayCoordinateSpace(overlay);
+		setImportantStyle(overlay, 'left', ((visibleLeft - coordinates.originX) / coordinates.scaleX) + 'px');
+		setImportantStyle(overlay, 'top', ((visibleTop - coordinates.originY) / coordinates.scaleY) + 'px');
+		setImportantStyle(overlay, 'width', ((visibleRight - visibleLeft) / coordinates.scaleX) + 'px');
+		setImportantStyle(overlay, 'height', ((visibleBottom - visibleTop) / coordinates.scaleY) + 'px');
+		setImportantStyle(overlay, 'border', '2px solid var(--vscode-focusBorder, #4da3ff)');
+		setImportantStyle(overlay, 'display', 'block');
+		setImportantStyle(overlay, 'visibility', 'visible');
+		overlay.dataset.visible = 'true';
+		lastGeometryKey = geometryKey;
+	};
+	const refresh = () => {
+		update();
+	};
+	const observeTarget = () => {
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+		}
+		if (typeof view.ResizeObserver !== 'function' || !targetElement) {
+			return;
+		}
+		resizeObserver = new view.ResizeObserver(refresh);
+		resizeObserver.observe(targetElement);
+	};
+	const show = (element) => {
+		targetElement = element;
+		observeTarget();
+		update();
+		if (trackingTimer === undefined) {
+			trackingTimer = view.setInterval(update, 100);
+		}
+	};
+	const verify = (element = targetElement) => {
+		if (!element || element !== targetElement || !overlayElement?.isConnected || overlayElement.dataset.visible !== 'true') {
+			return false;
+		}
+		const overlayRect = overlayElement.getBoundingClientRect();
+		const targetRect = element.getBoundingClientRect();
+		const viewport = view.visualViewport;
+		const viewportLeft = Math.max(0, viewport?.offsetLeft || 0);
+		const viewportTop = Math.max(0, viewport?.offsetTop || 0);
+		const viewportRight = viewportLeft + Math.max(0, viewport?.width || view.innerWidth || doc.documentElement.clientWidth);
+		const viewportBottom = viewportTop + Math.max(0, viewport?.height || view.innerHeight || doc.documentElement.clientHeight);
+		const expectedLeft = Math.max(viewportLeft, Math.min(viewportRight, targetRect.left));
+		const expectedTop = Math.max(viewportTop, Math.min(viewportBottom, targetRect.top));
+		const expectedRight = Math.max(viewportLeft, Math.min(viewportRight, targetRect.right));
+		const expectedBottom = Math.max(viewportTop, Math.min(viewportBottom, targetRect.bottom));
+		return !element.classList.contains('spt-browser-hover-outline')
+			&& overlayElement.parentElement === doc.documentElement
+			&& view.getComputedStyle(overlayElement).pointerEvents === 'none'
+			&& Math.abs(overlayRect.left - expectedLeft) < 1
+			&& Math.abs(overlayRect.top - expectedTop) < 1
+			&& Math.abs(overlayRect.right - expectedRight) < 1
+			&& Math.abs(overlayRect.bottom - expectedBottom) < 1;
+	};
+	const clear = () => {
+		targetElement = undefined;
+		if (trackingTimer !== undefined) {
+			view.clearInterval(trackingTimer);
+			trackingTimer = undefined;
+		}
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+			resizeObserver = undefined;
+		}
+		hideOverlay();
+	};
+	const destroy = () => {
+		clear();
+		doc.removeEventListener('scroll', refresh, true);
+		view.removeEventListener('resize', refresh);
+		if (view.visualViewport) {
+			view.visualViewport.removeEventListener('scroll', refresh);
+			view.visualViewport.removeEventListener('resize', refresh);
+		}
+		overlayElement?.remove();
+		overlayElement = undefined;
+	};
+
+	doc.addEventListener('scroll', refresh, true);
+	view.addEventListener('resize', refresh);
+	if (view.visualViewport) {
+		view.visualViewport.addEventListener('scroll', refresh);
+		view.visualViewport.addEventListener('resize', refresh);
+	}
+	return { show, clear, refresh, verify, destroy };
+}`;
 }
 
 function getLocalPreviewCss(): string {
@@ -1887,21 +2473,20 @@ body::-webkit-scrollbar-thumb:hover {
 body {
 	scrollbar-color: rgba(100, 116, 139, 0.72) rgba(15, 23, 42, 0.22);
 	scrollbar-width: auto;
-}
-.spt-browser-hover-outline {
-	outline: 2px solid var(--vscode-focusBorder, #007fd4) !important;
-	outline-offset: 2px !important;
 }`;
 }
 
 function getLocalPreviewScript(): string {
 	return `
 (() => {
+${getElementContextScript()}
 // 扩展运行时隔离在闭包内，避免与页面脚本的全局变量冲突。
+${getElementHighlightOverlayRuntimeSource()}
 const vscode = window.__smartPageTranslatorVsCodeApi || (window.__smartPageTranslatorVsCodeApi = acquireVsCodeApi());
 const settings = JSON.parse(document.getElementById('browser-settings')?.textContent || '{}');
-let inspectMode = false;
+let inspectMode = 'none';
 let hoveredElement;
+	const elementHighlight = createSmartPageTranslatorElementHighlight(document);
 	let toastTimer;
 	let pendingPageError;
 	let pageZoom = 1;
@@ -1912,6 +2497,7 @@ let hoveredElement;
 		pageZoom = Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
 		document.body.style.zoom = String(pageZoom);
 		document.body.style.overflowX = 'auto';
+		elementHighlight.refresh();
 	}
 	window.addEventListener('wheel', event => {
 		if (!event.ctrlKey && !event.metaKey) {
@@ -1936,9 +2522,9 @@ window.addEventListener('message', event => {
 		return;
 	}
 		if (data.type === 'setInspectMode') {
-			setInspectMode(Boolean(data.enabled));
+			setInspectMode(data.enabled ? (data.mode === 'full' ? 'full' : 'basic') : 'none');
 		} else if (data.type === 'selectElementBySelector') {
-			selectElementBySelector(data.selector, data.copyToClipboard);
+			selectElementBySelector(data.selector, data.copyToClipboard, data.verifyHighlightOverlay);
 		} else if (data.type === 'loadUrl') {
 			loadUrl(data);
 		} else if (data.type === 'showToast') {
@@ -1983,6 +2569,7 @@ function installToolbar() {
 		'<input id="url-input" type="text" aria-label="URL" readonly>',
 		'<nav class="browser-toolbar-group" aria-label="工具">',
 		'<button type="button" id="inspect-button" title="选中页面元素">选择元素</button>',
+		'<button type="button" id="inspect-plus-button" title="选中页面元素并复制完整上下文">选择元素+</button>',
 		'<button type="button" id="logs-button" title="复制浏览器日志">日志</button>',
 		'<button type="button" class="icon-button" id="external-button" title="在外部浏览器打开">↗</button>',
 		'<button type="button" id="devtools-button" title="打开 Webview 开发人员工具">DevTools</button>',
@@ -2010,7 +2597,8 @@ function installToolbar() {
 			}
 			location.reload();
 		});
-		document.getElementById('inspect-button').addEventListener('click', () => setInspectMode(!inspectMode));
+		document.getElementById('inspect-button').addEventListener('click', () => setInspectMode(inspectMode === 'basic' ? 'none' : 'basic'));
+		document.getElementById('inspect-plus-button').addEventListener('click', () => setInspectMode(inspectMode === 'full' ? 'none' : 'full'));
 	document.getElementById('logs-button').addEventListener('click', () => vscode.postMessage({ type: 'exportLogs' }));
 	document.getElementById('external-button').addEventListener('click', () => {
 		if (settings.url) {
@@ -2114,16 +2702,16 @@ function installToolbar() {
 	}
 
 	function handleInspectMove(event) {
-	if (!inspectMode || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
+	if (inspectMode === 'none' || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
 		return;
 	}
 	clearHover();
 	hoveredElement = event.target;
-	hoveredElement.classList.add('spt-browser-hover-outline');
+	elementHighlight.show(hoveredElement);
 }
 
 function handleInspectPointerEvent(event) {
-	if (!inspectMode || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
+	if (inspectMode === 'none' || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
 		return;
 	}
 	event.preventDefault();
@@ -2131,17 +2719,17 @@ function handleInspectPointerEvent(event) {
 }
 
 function handleInspectClick(event) {
-	if (!inspectMode || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
+	if (inspectMode === 'none' || !(event.target instanceof Element) || isPreviewChrome(event.target)) {
 		return;
 	}
 	event.preventDefault();
 	event.stopImmediatePropagation();
 	const element = describeElement(event.target);
-	postSelectedElement(element);
+	postSelectedElement(element, inspectMode === 'full' ? true : undefined, inspectMode === 'full');
 }
 
 function handleLinkClick(event) {
-	if (settings.mode !== 'url' || inspectMode || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) {
+	if (settings.mode !== 'url' || inspectMode !== 'none' || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) {
 		return;
 	}
 	const anchor = event.target.closest('a[href]');
@@ -2156,7 +2744,7 @@ function handleLinkClick(event) {
 	navigateToUrl(href);
 }
 
-function selectElementBySelector(selector, copyToClipboard) {
+function selectElementBySelector(selector, copyToClipboard, verifyHighlightOverlay) {
 	const cssSelector = String(selector || '');
 	if (!cssSelector) {
 		return;
@@ -2166,8 +2754,11 @@ function selectElementBySelector(selector, copyToClipboard) {
 		if (element instanceof Element && !isPreviewChrome(element)) {
 			clearHover();
 			hoveredElement = element;
-			hoveredElement.classList.add('spt-browser-hover-outline');
-			postSelectedElement(describeElement(element), copyToClipboard);
+			elementHighlight.show(hoveredElement);
+			if (verifyHighlightOverlay) {
+				verifyElementHighlightOverlay(element);
+			}
+			postSelectedElement(describeElement(element), copyToClipboard, false);
 		} else {
 			recordLog('warn', 'Selector did not match any selectable element: ' + cssSelector, 'page');
 		}
@@ -2176,32 +2767,44 @@ function selectElementBySelector(selector, copyToClipboard) {
 	}
 }
 
-function postSelectedElement(element, copyToClipboard) {
+function verifyElementHighlightOverlay(target) {
+	const initialValid = elementHighlight.verify(target);
+	const originalInset = target.style.inset;
+	target.style.inset = '48px 64px';
 	setTimeout(() => {
-		vscode.postMessage({ type: 'selectedElement', element, copyToClipboard });
+		const followedLayoutChange = elementHighlight.verify(target);
+		target.style.inset = originalInset;
+		elementHighlight.refresh();
+		const valid = initialValid && followedLayoutChange;
+		recordLog(valid ? 'info' : 'error', 'Independent highlight overlay verification: ' + (valid ? 'passed' : 'failed'), 'browser');
+	}, 150);
+}
+
+function postSelectedElement(element, copyToClipboard, fullContext) {
+	setTimeout(() => {
+		vscode.postMessage({ type: 'selectedElement', element, copyToClipboard, fullContext });
 	}, 0);
 }
 
-function setInspectMode(enabled) {
-	inspectMode = enabled;
-	document.getElementById('inspect-button')?.classList.toggle('active', enabled);
-	if (!enabled) {
+function setInspectMode(mode) {
+	inspectMode = mode === 'full' || mode === 'basic' ? mode : 'none';
+	document.getElementById('inspect-button')?.classList.toggle('active', inspectMode === 'basic');
+	document.getElementById('inspect-plus-button')?.classList.toggle('active', inspectMode === 'full');
+	if (inspectMode === 'none') {
 		clearHover();
 	}
 }
 
 function clearHover() {
-	if (!hoveredElement) {
-		return;
-	}
-	hoveredElement.classList.remove('spt-browser-hover-outline');
 	hoveredElement = undefined;
+	elementHighlight.clear();
 }
 
 function describeElement(element) {
-	const rect = element.getBoundingClientRect();
+	const target = getInspectableElement(element);
+	const rect = target.getBoundingClientRect();
 	const path = [];
-	let current = element;
+	let current = target;
 	while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.documentElement) {
 		let part = current.tagName.toLowerCase();
 		if (current.id) {
@@ -2217,12 +2820,18 @@ function describeElement(element) {
 		current = current.parentElement;
 	}
 	return {
-		tagName: element.tagName.toLowerCase(),
-		id: element.id || undefined,
-		className: typeof element.className === 'string' ? element.className : undefined,
-		text: (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
-		outerHTML: element.outerHTML || undefined,
+		tagName: target.tagName.toLowerCase(),
+		id: target.id || undefined,
+		className: typeof target.className === 'string' ? target.className : undefined,
+		role: target.getAttribute('role') || undefined,
+		ariaLabel: target.getAttribute('aria-label') || undefined,
+		title: target.getAttribute('title') || undefined,
+		testId: target.getAttribute('data-testid') || undefined,
+		text: (target.innerText || target.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
+		outerHTML: getCleanOuterHTML(target),
 		selector: path.join(' > '),
+		url: getElementContextUrl(target, settings.url),
+		css: getElementCssContext(target),
 		rect: {
 			x: Math.round(rect.x),
 			y: Math.round(rect.y),
@@ -2278,7 +2887,7 @@ function stringifyValue(value) {
 }
 
 function isPreviewChrome(element) {
-	return Boolean(element.closest('#smart-page-translator-browser-toolbar,#smart-page-translator-browser-toast'));
+	return Boolean(element.closest('#smart-page-translator-browser-toolbar,#smart-page-translator-browser-toast,#smart-page-translator-element-highlight'));
 }
 
 function errorMessage(error) {
@@ -2414,6 +3023,8 @@ body.focus-lock-enabled .browser-content:focus-within::after {
 function getFrameBridgeSource(): string {
 	return `
 		(function smartPageTranslatorFrameBridge() {
+			${getElementHighlightOverlayRuntimeSource()}
+			${getElementContextScript()}
 			const channel = 'smartPageTranslator.browser';
 			const proxy = window.__smartPageTranslatorProxy;
 			const send = (payload) => window.parent.postMessage({ channel, token: proxy && proxy.sessionToken, payload }, '*');
@@ -2446,6 +3057,7 @@ function getFrameBridgeSource(): string {
 	const setPageZoom = (value) => {
 		pageZoom = Math.min(2, Math.max(0.5, Math.round(value * 10) / 10));
 		document.documentElement.style.zoom = String(pageZoom);
+		elementHighlight.refresh();
 	};
 	window.addEventListener('wheel', event => {
 		if (!event.ctrlKey && !event.metaKey) {
@@ -2501,14 +3113,15 @@ function getFrameBridgeSource(): string {
 			}
 	}
 
-	let inspectMode = false;
+	let inspectMode = 'none';
 	let hovered;
-	installHoverStyle();
+	const elementHighlight = createSmartPageTranslatorElementHighlight(document);
 
-	const describeElement = (element) => {
-		const rect = element.getBoundingClientRect();
+const describeElement = (element) => {
+		const target = getInspectableElement(element);
+		const rect = target.getBoundingClientRect();
 		const path = [];
-		let current = element;
+		let current = target;
 		while (current && current.nodeType === Node.ELEMENT_NODE && current !== document.documentElement) {
 			let part = current.tagName.toLowerCase();
 			if (current.id) {
@@ -2524,12 +3137,18 @@ function getFrameBridgeSource(): string {
 			current = current.parentElement;
 		}
 		return {
-			tagName: element.tagName.toLowerCase(),
-			id: element.id || undefined,
-			className: typeof element.className === 'string' ? element.className : undefined,
-			text: (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
-			outerHTML: element.outerHTML || undefined,
+			tagName: target.tagName.toLowerCase(),
+			id: target.id || undefined,
+			className: typeof target.className === 'string' ? target.className : undefined,
+			role: target.getAttribute('role') || undefined,
+			ariaLabel: target.getAttribute('aria-label') || undefined,
+			title: target.getAttribute('title') || undefined,
+			testId: target.getAttribute('data-testid') || undefined,
+			text: (target.innerText || target.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
+			outerHTML: getCleanOuterHTML(target),
 			selector: path.join(' > '),
+			url: getElementContextUrl(target, proxy && proxy.targetUrl),
+			css: getElementCssContext(target),
 			rect: {
 				x: Math.round(rect.x),
 				y: Math.round(rect.y),
@@ -2539,21 +3158,19 @@ function getFrameBridgeSource(): string {
 		};
 	};
 	const clearHover = () => {
-		if (hovered) {
-			hovered.classList.remove('spt-browser-hover-outline');
-			hovered = undefined;
-		}
+		hovered = undefined;
+		elementHighlight.clear();
 	};
 	document.addEventListener('mousemove', event => {
-		if (!inspectMode || !(event.target instanceof Element)) {
+		if (inspectMode === 'none' || !(event.target instanceof Element) || event.target.closest('#smart-page-translator-element-highlight')) {
 			return;
 		}
 		clearHover();
 		hovered = event.target;
-		hovered.classList.add('spt-browser-hover-outline');
+		elementHighlight.show(hovered);
 	}, true);
 	const blockInspectPointerEvent = event => {
-		if (!inspectMode || !(event.target instanceof Element)) {
+		if (inspectMode === 'none' || !(event.target instanceof Element)) {
 			return;
 		}
 		event.preventDefault();
@@ -2563,10 +3180,10 @@ function getFrameBridgeSource(): string {
 	document.addEventListener('mousedown', blockInspectPointerEvent, true);
 	document.addEventListener('mouseup', blockInspectPointerEvent, true);
 	document.addEventListener('click', event => {
-		if (inspectMode && event.target instanceof Element) {
+		if (inspectMode !== 'none' && event.target instanceof Element) {
 			event.preventDefault();
 			event.stopImmediatePropagation();
-			send({ type: 'selectedElement', element: describeElement(event.target) });
+			send({ type: 'selectedElement', element: describeElement(event.target), fullContext: inspectMode === 'full' });
 			return;
 		}
 		if (!proxy || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || !(event.target instanceof Element)) {
@@ -2598,8 +3215,8 @@ function getFrameBridgeSource(): string {
 		}
 		send({ type: 'controlAck', stage: 'proxy', controlType: event.data.type });
 		if (event.data.type === 'setInspectMode') {
-			inspectMode = Boolean(event.data.enabled);
-			if (!inspectMode) {
+			inspectMode = event.data.enabled ? (event.data.mode === 'full' ? 'full' : 'basic') : 'none';
+			if (inspectMode === 'none') {
 				clearHover();
 			}
 		} else if (event.data.type === 'selectElementBySelector') {
@@ -2612,8 +3229,17 @@ function getFrameBridgeSource(): string {
 				if (element instanceof Element) {
 					clearHover();
 					hovered = element;
-					hovered.classList.add('spt-browser-hover-outline');
-					send({ type: 'selectedElement', element: describeElement(element), copyToClipboard: event.data.copyToClipboard });
+					elementHighlight.show(hovered);
+					if (event.data.verifyHighlightOverlay) {
+						const valid = elementHighlight.verify(element);
+						send({ type: 'pageLog', level: valid ? 'info' : 'error', values: ['Independent highlight overlay verification: ' + (valid ? 'passed' : 'failed')] });
+					}
+					send({
+						type: 'selectedElement',
+						element: describeElement(element),
+						copyToClipboard: event.data.copyToClipboard,
+						fullContext: false
+					});
 					return;
 				} else {
 					send({ type: 'pageLog', level: 'warn', values: ['Selector did not match any element: ' + selector] });
@@ -2630,23 +3256,6 @@ function getFrameBridgeSource(): string {
 			}
 		}
 	});
-
-	function installHoverStyle() {
-		const append = () => {
-			if (document.getElementById('smart-page-translator-frame-bridge-style')) {
-				return;
-			}
-			const style = document.createElement('style');
-			style.id = 'smart-page-translator-frame-bridge-style';
-			style.textContent = '.spt-browser-hover-outline{outline:2px solid #4da3ff !important; outline-offset:2px !important;}';
-			(document.head || document.documentElement).appendChild(style);
-		};
-		if (document.readyState === 'loading') {
-			document.addEventListener('DOMContentLoaded', append, { once: true });
-		} else {
-			append();
-		}
-	}
 
 		function patchNetworkRequests() {
 		const originalFetch = window.fetch ? window.fetch.bind(window) : undefined;
@@ -2719,12 +3328,15 @@ function getFrameBridgeSource(): string {
 
 function getWebviewScript(): string {
 	return `
+${getElementHighlightOverlayRuntimeSource()}
+${getElementContextScript()}
 const vscode = window.__smartPageTranslatorVsCodeApi || (window.__smartPageTranslatorVsCodeApi = acquireVsCodeApi());
 const settings = JSON.parse(document.getElementById('browser-settings').textContent || '{}');
 const frame = document.getElementById('browser-frame');
 const input = document.getElementById('url-input');
 const info = document.getElementById('browser-info');
 const inspectButton = document.getElementById('inspect-button');
+const inspectPlusButton = document.getElementById('inspect-plus-button');
 const logsButton = document.getElementById('logs-button');
 const externalButton = document.getElementById('external-button');
 const devtoolsButton = document.getElementById('devtools-button');
@@ -2735,10 +3347,12 @@ const reloadButton = document.getElementById('reload-button');
 		? new URL(settings.proxyUrl).searchParams.get('${PROXY_PAGE_TOKEN_QUERY}')
 		: undefined;
 	let currentUrl = settings.url || '';
-	let inspectMode = false;
+	let inspectMode = 'none';
 	let renderSequence = 0;
 	let frameInspectDisposables = [];
 	let frameHoveredElement;
+	let frameElementHighlight;
+	let frameHighlightDocument;
 	let toastTimer;
 
 document.body.classList.toggle('focus-lock-enabled', Boolean(settings.focusLockEnabled));
@@ -2758,9 +3372,9 @@ window.addEventListener('message', event => {
 		return;
 	}
 	if (data.type === 'setInspectMode') {
-		setInspectMode(Boolean(data.enabled));
-	} else if (data.type === 'selectElementBySelector') {
-		selectElementBySelector(data.selector, data.copyToClipboard);
+		setInspectMode(data.enabled ? (data.mode === 'full' ? 'full' : 'basic') : 'none');
+		} else if (data.type === 'selectElementBySelector') {
+		selectElementBySelector(data.selector, data.copyToClipboard, data.verifyHighlightOverlay);
 	} else if (data.type === 'loadUrl') {
 		loadUrl(data);
 	} else if (data.type === 'showToast') {
@@ -2788,7 +3402,8 @@ input.addEventListener('keydown', event => {
 backButton.addEventListener('click', () => navigateHistory(-1));
 forwardButton.addEventListener('click', () => navigateHistory(1));
 reloadButton.addEventListener('click', () => renderCurrentInput());
-inspectButton.addEventListener('click', () => setInspectMode(!inspectMode));
+inspectButton.addEventListener('click', () => setInspectMode(inspectMode === 'basic' ? 'none' : 'basic'));
+inspectPlusButton.addEventListener('click', () => setInspectMode(inspectMode === 'full' ? 'none' : 'full'));
 logsButton.addEventListener('click', () => vscode.postMessage({ type: 'exportLogs' }));
 externalButton.addEventListener('click', () => {
 	if (currentUrl) {
@@ -2983,7 +3598,12 @@ function handlePageBridgeMessage(payload) {
 	}
 	if (payload.type === 'selectedElement') {
 		setTimeout(() => {
-			vscode.postMessage({ type: 'selectedElement', element: payload.element, copyToClipboard: payload.copyToClipboard });
+			vscode.postMessage({
+				type: 'selectedElement',
+				element: payload.element,
+				copyToClipboard: payload.copyToClipboard,
+				fullContext: payload.fullContext
+			});
 		}, 0);
 		return;
 	}
@@ -2992,19 +3612,21 @@ function handlePageBridgeMessage(payload) {
 	}
 }
 
-function setInspectMode(enabled) {
-	inspectMode = enabled;
-	inspectButton.classList.toggle('active', enabled);
+function setInspectMode(mode) {
+	inspectMode = mode === 'full' || mode === 'basic' ? mode : 'none';
+	inspectButton.classList.toggle('active', inspectMode === 'basic');
+	inspectPlusButton.classList.toggle('active', inspectMode === 'full');
 	if (settings.mode === 'url' && settings.proxyUrl) {
 		frame.contentWindow.postMessage({
 			channel: 'smartPageTranslator.browser.control',
 			token: bridgeToken,
 			type: 'setInspectMode',
-			enabled
+			enabled: inspectMode !== 'none',
+			mode: inspectMode
 		}, '*');
 		return;
 	}
-	if (installFrameInspectMode(enabled)) {
+	if (installFrameInspectMode(inspectMode)) {
 		return;
 	}
 	if (frame.getAttribute('srcdoc') !== null) {
@@ -3016,25 +3638,27 @@ function setInspectMode(enabled) {
 			channel: 'smartPageTranslator.browser.control',
 			token: bridgeToken,
 			type: 'setInspectMode',
-			enabled
+			enabled: inspectMode !== 'none',
+			mode: inspectMode
 		}, '*');
 	} catch {
 		notify('当前页面跨域，无法启用元素选择。', 'warning');
 	}
 }
 
-function selectElementBySelector(selector, copyToClipboard) {
+function selectElementBySelector(selector, copyToClipboard, verifyHighlightOverlay) {
 	if (settings.mode === 'url' && settings.proxyUrl) {
 		frame.contentWindow.postMessage({
 			channel: 'smartPageTranslator.browser.control',
 			token: bridgeToken,
 			type: 'selectElementBySelector',
 			selector: String(selector || ''),
-			copyToClipboard
+			copyToClipboard,
+			verifyHighlightOverlay
 		}, '*');
 		return;
 	}
-	if (selectElementInFrame(selector, copyToClipboard)) {
+	if (selectElementInFrame(selector, copyToClipboard, verifyHighlightOverlay)) {
 		return;
 	}
 	if (frame.getAttribute('srcdoc') !== null) {
@@ -3047,39 +3671,44 @@ function selectElementBySelector(selector, copyToClipboard) {
 			token: bridgeToken,
 			type: 'selectElementBySelector',
 			selector: String(selector || ''),
-			copyToClipboard
+			copyToClipboard,
+			verifyHighlightOverlay
 		}, '*');
 	} catch {
 		notify('当前页面跨域，无法选择元素。', 'warning');
 	}
 }
 
-function installFrameInspectMode(enabled) {
+function installFrameInspectMode(mode) {
 	disposeFrameInspectMode();
-	if (!enabled) {
+	if (mode === 'none') {
 		return true;
 	}
 	const doc = getFrameDocument();
 	if (!doc || !doc.documentElement) {
 		return false;
 	}
-	ensureFrameHoverStyle(doc);
+	const elementHighlight = ensureFrameElementHighlight(doc);
 	const handleMove = event => {
-		if (!inspectMode || !isFrameElement(event.target)) {
+		if (inspectMode === 'none' || !isFrameElement(event.target) || event.target.id === 'smart-page-translator-element-highlight') {
 			return;
 		}
 		clearFrameHover();
 		frameHoveredElement = event.target;
-		frameHoveredElement.classList.add('spt-browser-hover-outline');
+		elementHighlight.show(frameHoveredElement);
 	};
 	const handleClick = event => {
-		if (!inspectMode || !isFrameElement(event.target)) {
+		if (inspectMode === 'none' || !isFrameElement(event.target)) {
 			return;
 		}
 		event.preventDefault();
 		event.stopPropagation();
 		setTimeout(() => {
-			vscode.postMessage({ type: 'selectedElement', element: describeFrameElement(event.target) });
+			vscode.postMessage({
+				type: 'selectedElement',
+				element: describeFrameElement(event.target),
+				fullContext: inspectMode === 'full'
+			});
 		}, 0);
 	};
 	doc.addEventListener('mousemove', handleMove, true);
@@ -3101,17 +3730,17 @@ function disposeFrameInspectMode() {
 			// Ignore stale frame listeners from a document that is being replaced.
 		}
 	}
+	frameElementHighlight?.destroy();
+	frameElementHighlight = undefined;
+	frameHighlightDocument = undefined;
 }
 
 function clearFrameHover() {
-	if (!frameHoveredElement) {
-		return;
-	}
-	frameHoveredElement.classList.remove('spt-browser-hover-outline');
 	frameHoveredElement = undefined;
+	frameElementHighlight?.clear();
 }
 
-function selectElementInFrame(selector, copyToClipboard) {
+function selectElementInFrame(selector, copyToClipboard, verifyHighlightOverlay) {
 	const doc = getFrameDocument();
 	if (!doc || !doc.documentElement) {
 		return false;
@@ -3123,12 +3752,20 @@ function selectElementInFrame(selector, copyToClipboard) {
 	try {
 		const element = doc.querySelector(cssSelector);
 		if (isFrameElement(element)) {
-			ensureFrameHoverStyle(doc);
 			clearFrameHover();
 			frameHoveredElement = element;
-			frameHoveredElement.classList.add('spt-browser-hover-outline');
+			ensureFrameElementHighlight(doc).show(frameHoveredElement);
+			if (verifyHighlightOverlay) {
+				const valid = frameElementHighlight?.verify(element) === true;
+				recordLog(valid ? 'info' : 'error', 'Independent highlight overlay verification: ' + (valid ? 'passed' : 'failed'), 'browser');
+			}
 			setTimeout(() => {
-				vscode.postMessage({ type: 'selectedElement', element: describeFrameElement(element), copyToClipboard });
+				vscode.postMessage({
+					type: 'selectedElement',
+					element: describeFrameElement(element),
+					copyToClipboard,
+					fullContext: false
+				});
 			}, 0);
 		} else {
 			recordLog('warn', 'Selector did not match any element: ' + cssSelector, 'page');
@@ -3147,14 +3784,14 @@ function getFrameDocument() {
 	}
 }
 
-function ensureFrameHoverStyle(doc) {
-	if (doc.getElementById('smart-page-translator-frame-parent-style')) {
-		return;
+function ensureFrameElementHighlight(doc) {
+	if (frameElementHighlight && frameHighlightDocument === doc) {
+		return frameElementHighlight;
 	}
-	const style = doc.createElement('style');
-	style.id = 'smart-page-translator-frame-parent-style';
-	style.textContent = '.spt-browser-hover-outline{outline:2px solid #4da3ff !important;outline-offset:2px !important;}';
-	(doc.head || doc.documentElement).appendChild(style);
+	frameElementHighlight?.destroy();
+	frameHighlightDocument = doc;
+	frameElementHighlight = createSmartPageTranslatorElementHighlight(doc);
+	return frameElementHighlight;
 }
 
 function isFrameElement(value) {
@@ -3163,9 +3800,10 @@ function isFrameElement(value) {
 
 function describeFrameElement(element) {
 	const doc = element.ownerDocument || document;
-	const rect = element.getBoundingClientRect();
+	const target = getInspectableElement(element);
+	const rect = target.getBoundingClientRect();
 	const path = [];
-	let current = element;
+	let current = target;
 	while (current && current.nodeType === 1 && current !== doc.documentElement) {
 		let part = current.tagName.toLowerCase();
 		if (current.id) {
@@ -3181,12 +3819,18 @@ function describeFrameElement(element) {
 		current = current.parentElement;
 	}
 	return {
-		tagName: element.tagName.toLowerCase(),
-		id: element.id || undefined,
-		className: typeof element.className === 'string' ? element.className : undefined,
-		text: (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
-		outerHTML: element.outerHTML || undefined,
+		tagName: target.tagName.toLowerCase(),
+		id: target.id || undefined,
+		className: typeof target.className === 'string' ? target.className : undefined,
+		role: target.getAttribute('role') || undefined,
+		ariaLabel: target.getAttribute('aria-label') || undefined,
+		title: target.getAttribute('title') || undefined,
+		testId: target.getAttribute('data-testid') || undefined,
+		text: (target.innerText || target.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
+		outerHTML: getCleanOuterHTML(target),
 		selector: path.join(' > '),
+		url: getElementContextUrl(target, currentUrl),
+		css: getElementCssContext(target),
 		rect: {
 			x: Math.round(rect.x),
 			y: Math.round(rect.y),

@@ -14,7 +14,7 @@ if (!fs.existsSync(vsixPath)) {
 
 console.log(`Publishing ${vsixName} to Marketplace...`);
 try {
-  execSync(`npx vsce publish -i "${vsixPath}"`, { stdio: 'inherit' });
+  execSync(`npx --no-install @vscode/vsce publish -i "${vsixPath}"`, { stdio: 'inherit' });
   console.log('Publish completed successfully.');
 } catch (err) {
   console.error('Publish failed.');

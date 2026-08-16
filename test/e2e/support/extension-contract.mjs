@@ -6,6 +6,7 @@ export const ROOT_FILES_VIEW_ID = 'smart-page-translator-root-files';
 export const OPEN_NOTES_VIEW_COMMAND = `workbench.view.extension.${VIEW_CONTAINER_ID}`;
 export const OPEN_EXPLORER_VIEW_COMMAND = 'workbench.view.explorer';
 export const FOCUS_ROOT_FILES_VIEW_COMMAND = `${ROOT_FILES_VIEW_ID}.focus`;
+export const OPEN_COMMAND = 'vscode.open';
 export const OPEN_WITH_COMMAND = 'vscode.openWith';
 
 export const CUSTOM_EDITORS = {
@@ -43,7 +44,9 @@ export const COMMANDS = {
   internal: {
     closeStandaloneBrowser: 'smartPageTranslator.internal.closeStandaloneBrowser',
     getBrowserState: 'smartPageTranslator.internal.getBrowserState',
+    getSelectedBrowserElementContext: 'smartPageTranslator.internal.getSelectedBrowserElementContext',
     getLastAstOutline: 'smartPageTranslator.internal.getLastAstOutline',
+    getRootFileItemCommandState: 'smartPageTranslator.internal.getRootFileItemCommandState',
     getRootFileQuickPathStorage: 'smartPageTranslator.internal.getRootFileQuickPathStorage',
     selectBrowserElementBySelector: 'smartPageTranslator.internal.selectBrowserElementBySelector',
     setBrowserInspectMode: 'smartPageTranslator.internal.setBrowserInspectMode',

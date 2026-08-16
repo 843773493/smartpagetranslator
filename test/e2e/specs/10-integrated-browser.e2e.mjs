@@ -109,6 +109,39 @@ describe('Smart Page Translator integrated browser E2E', () => {
       const selectedChildState = await waitForSelectedElement('#iframe-child-message');
       assert.equal(selectedChildState.active?.selectedElement?.id, 'iframe-child-message');
       assert.match(selectedChildState.active?.selectedElement?.text || '', /static-child-ready/);
+      await waitForServerRequest(server, request => request.pathname === '/picker-overlay-confirmed', 'independent picker overlay');
+    } finally {
+      await closeStandaloneBrowser();
+      await server.close();
+    }
+  });
+
+  it('keeps multiple standalone browser panels open independently', async () => {
+    const server = await startHttpFixtureServer();
+    try {
+      const firstUrl = `${server.origin}/panel-one`;
+      const secondUrl = `${server.origin}/panel-two`;
+
+      await executeCommandWithInput(COMMANDS.browser.openUrl, firstUrl);
+      await waitForServerRequest(server, request => request.pathname === '/panel-one', 'first browser panel');
+      const firstState = await waitForBrowserState(firstUrl, 1);
+      const firstPanel = browserUrlPanels(firstState).find(panel => panel.url === firstUrl);
+      assert.ok(firstPanel?.key, 'First browser panel did not expose a stable key');
+
+      await executeCommandWithInput(COMMANDS.browser.openUrl, secondUrl);
+      await waitForServerRequest(server, request => request.pathname === '/panel-two', 'second browser panel');
+      const secondState = await waitForBrowserState(secondUrl, 2);
+      const panels = browserUrlPanels(secondState);
+      assert.equal(panels.length, 2);
+      assert.deepEqual(
+        panels.map(panel => panel.url).sort(),
+        [firstUrl, secondUrl].sort()
+      );
+      assert.notEqual(
+        panels.find(panel => panel.url === firstUrl)?.key,
+        panels.find(panel => panel.url === secondUrl)?.key
+      );
+      assert.equal(secondState.active?.url, secondUrl);
     } finally {
       await closeStandaloneBrowser();
       await server.close();
@@ -326,14 +359,29 @@ async function startHttpFixtureServer() {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-store'
       });
-      response.end(`<!doctype html><html><body><button id="iframe-child-message">${label}</button><script>
+      response.end(`<!doctype html><html><head><style>html,body{width:100%;height:100%;margin:0;overflow:hidden}#iframe-child-message{position:fixed;inset:-20px}</style></head><body><button id="iframe-child-message">${label}</button><script>
         window.addEventListener('message', event => {
           if (event.data?.channel === 'smartPageTranslator.browser.control' && event.data?.type === 'setInspectMode') {
             fetch('/picker-control-confirmed', { cache: 'no-store' });
             if (event.data.enabled) {
               setTimeout(() => {
+                const target = document.getElementById('iframe-child-message');
+                target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
+                const overlay = document.getElementById('smart-page-translator-element-highlight');
+                const overlayRect = overlay?.getBoundingClientRect();
+                const overlayIsValid = !target.classList.contains('spt-browser-hover-outline')
+                  && overlay?.parentElement === document.documentElement
+                  && overlay?.dataset.visible === 'true'
+                  && getComputedStyle(overlay).pointerEvents === 'none'
+                  && Math.round(overlayRect.left) === 0
+                  && Math.round(overlayRect.top) === 0
+                  && Math.round(overlayRect.right) === window.innerWidth
+                  && Math.round(overlayRect.bottom) === window.innerHeight;
+                if (overlayIsValid) {
+                  fetch('/picker-overlay-confirmed', { cache: 'no-store' });
+                }
                 fetch('/picker-click-triggered', { cache: 'no-store' });
-                document.getElementById('iframe-child-message').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+                target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
               }, 0);
             }
           }
@@ -357,6 +405,12 @@ async function startHttpFixtureServer() {
     }
 
     if (url.pathname === '/picker-control-confirmed' || url.pathname === '/picker-click-triggered') {
+      response.writeHead(204, { 'cache-control': 'no-store' });
+      response.end();
+      return;
+    }
+
+    if (url.pathname === '/picker-overlay-confirmed') {
       response.writeHead(204, { 'cache-control': 'no-store' });
       response.end();
       return;
@@ -465,7 +519,7 @@ async function startHttpFixtureServer() {
   };
 }
 
-async function waitForBrowserState(expectedUrl) {
+async function waitForBrowserState(expectedUrl, expectedPanelCount = 1) {
   let state;
   try {
     await browser.waitUntil(async () => {
@@ -473,7 +527,7 @@ async function waitForBrowserState(expectedUrl) {
         state = await readBrowserState();
         return state.active?.url === expectedUrl
           && state.active?.webviewUrl === expectedUrl
-          && browserUrlPanels(state).length === 1;
+		  && browserUrlPanels(state).length === expectedPanelCount;
 	  } catch (error) {
 	    state = { readError: String(error?.stack || error) };
         return false;
@@ -513,7 +567,7 @@ async function waitForServerRequest(server, predicate, label) {
 }
 
 function browserUrlPanels(state) {
-  return state.panels.filter((panel) => panel.key === 'standalone-browser');
+  return state.panels.filter((panel) => panel.mode === 'url' && panel.key.startsWith('standalone-browser:'));
 }
 
 function formatRequest(request) {

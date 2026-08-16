@@ -15,16 +15,37 @@
       color: #82aaff;
     }
 
+    #html-preview-edge-clip {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
     #html-preview-e2e-message {
+      position: absolute;
+      inset: -20px;
+      margin: 0;
       color: #2fbf88;
+    }
+
+    .html-preview-action-icon {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
     }
   </style>
 </head>
 <body>
   <main>
     <h1 id="html-preview-e2e-title">HTML 预览标题</h1>
-    <p id="html-preview-e2e-message">Smart Page Translator HTML 渲染成功</p>
+    <button id="html-preview-e2e-action" type="button" aria-label="HTML 预览操作">
+      <span id="html-preview-e2e-action-icon" class="html-preview-action-icon" aria-hidden="true"></span>
+    </button>
   </main>
+  <div id="html-preview-edge-clip">
+    <p id="html-preview-e2e-message">Smart Page Translator HTML 渲染成功</p>
+  </div>
   <script>
     const notify = (message) => message;
     console.log('HTML 预览 fixture 日志');

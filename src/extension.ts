@@ -9,6 +9,7 @@ import { registerRunPytestCommand } from './commands/runPytest';
 import { registerRunWithTsxCommand } from './commands/runWithTsx';
 import { registerTranslateCommand } from './commands/translate';
 import { registerRootFileCommands } from './files/rootFileCommands';
+import { RootFileItem } from './files/rootFileItem';
 import { ROOT_FILE_QUICK_PATHS_KEY, RootFileTreeProvider } from './files/rootFileTreeProvider';
 import { getNotesExtensions, getNotesLocation, registerNotesCommands } from './notes/notesCommands';
 import { NotesViewProvider } from './notes/notesViewProvider';
@@ -55,6 +56,16 @@ export function activate(context: vscode.ExtensionContext) {
             globalQuickPaths: context.globalState.get<string[]>(ROOT_FILE_QUICK_PATHS_KEY, []),
             workspaceQuickPaths: context.workspaceState.get<string[]>(ROOT_FILE_QUICK_PATHS_KEY, [])
         }))
+    );
+    context.subscriptions.push(
+        vscode.commands.registerCommand('smartPageTranslator.internal.getRootFileItemCommandState', async (uri: vscode.Uri) => {
+            const stat = await vscode.workspace.fs.stat(uri);
+            const item = RootFileItem.fromUri(uri, stat.type);
+            return {
+                command: item.command?.command,
+                argumentCount: item.command?.arguments?.length ?? 0
+            };
+        })
     );
     logFn('Extension', 'RootFileTreeProvider registered DONE');
 

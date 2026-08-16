@@ -99,8 +99,10 @@ npm run artifacts:latest
    - `smartPageTranslator.internal.useDeterministicTranslator`：翻译 E2E 使用，避免依赖真实 Bing 网络结果。
    - `smartPageTranslator.internal.getLastAstOutline`：AST E2E 使用，读取最近一次 outline，避免 headless 剪贴板读取不稳定。
    - `smartPageTranslator.internal.getRootFileQuickPathStorage`：根目录文件树 E2E 使用，确认快捷路径写入工作区状态而不是全局状态。
+   - `smartPageTranslator.internal.getRootFileItemCommandState`：根目录文件树 E2E 使用，只读确认文件节点通过 VS Code API 命令打开，不会生成易失效的自定义命令代理。
    - `smartPageTranslator.internal.getBrowserState`：集成浏览器 E2E 使用，读取 Webview 管理器状态，避免不同 VS Code 版本的 Webview frame DOM 差异导致断言不稳定。
    - `smartPageTranslator.internal.closeStandaloneBrowser`：集成浏览器 E2E 清理使用，关闭独立浏览器 Webview，避免后续 Webview 用例复用错误 frame。
+   - `smartPageTranslator.internal.getSelectedBrowserElementContext`：HTML 预览 E2E 使用，只读获取当前元素完整上下文，避免大文本剪贴板写入干扰 VS Code 测试宿主。
    - `smartPageTranslator.internal.setBrowserInspectMode`：集成浏览器 E2E 使用，开启或关闭页面元素选择模式。
    - `smartPageTranslator.internal.selectBrowserElementBySelector`：集成浏览器 E2E 使用，通过注入桥按 CSS selector 触发元素选择，避免 WebDriver 穿透 VS Code Webview iframe 的不稳定性；URL 浏览器只验证选择状态时可传 `{ copyToClipboard: false }`，剪贴板导出由 HTML 预览用例单独覆盖。
    这些命令是测试接缝；删除或改名必须同步更新 `test/e2e/support/extension-contract.mjs` 和相关 spec。

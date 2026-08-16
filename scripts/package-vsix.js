@@ -10,7 +10,7 @@ const outName = `${pkg.name}-${pkg.version}.vsix`;
 
 console.log(`Packaging ${outName} into ${outDir}`);
 try {
-  execSync(`npx vsce package -o "${path.join(outDir, outName)}"`, { stdio: 'inherit' });
+  execSync(`npx --no-install @vscode/vsce package -o "${path.join(outDir, outName)}"`, { stdio: 'inherit' });
   console.log('Package created successfully.');
 } catch (err) {
   console.error('Packaging failed.');

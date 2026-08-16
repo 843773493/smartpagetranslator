@@ -27,4 +27,5 @@
 - URL 模式 CSP 需要兼容常见站点的动态脚本执行；工具栏挂载在 `<html>` 层，页面 `body` 整体下移并缩短视口，禁止用覆盖式 toolbar 遮挡 fixed 页面顶部，也不要包裹页面 body 子节点破坏直属 CSS selector。
 - URL 页面元素选择通过注入桥和 `smartPageTranslator.internal.selectBrowserElementBySelector` 验证；只断言选择结果时传 `{ copyToClipboard: false }`，避免把剪贴板稳定性混进 URL 代理测试。
 - 真实鼠标选择回归使用 `SPT_E2E_BROWSER_URL=<url>` 启用，必须验证业务 DOM、WebDriver 点击和关键字体实际加载；内部 selector 命令不能替代真实交互验收。
+- 元素选择高亮必须使用挂在当前文档 `<html>` 下的独立覆盖层，禁止给业务元素添加 outline/class；覆盖层需要限制在可视区域内，并随滚动、缩放和布局变化更新。
 - 命令和 E2E 需要通过系统剪贴板验证导出结果，不要弹保存路径对话框。

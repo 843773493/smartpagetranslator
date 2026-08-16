@@ -4,6 +4,24 @@ import * as vscode from 'vscode';
 
 let useDeterministicTranslator = false;
 
+function getTabInputUri(input: unknown): vscode.Uri | undefined {
+    if (!input || typeof input !== 'object') {
+        return undefined;
+    }
+
+    if ('uri' in input && input.uri instanceof vscode.Uri) {
+        return input.uri;
+    }
+    if ('resource' in input && input.resource instanceof vscode.Uri) {
+        return input.resource;
+    }
+    if ('localResource' in input && input.localResource instanceof vscode.Uri) {
+        return input.localResource;
+    }
+
+    return undefined;
+}
+
 export function registerTranslateCommand(
     context: vscode.ExtensionContext,
     output: vscode.OutputChannel,
@@ -19,19 +37,18 @@ export function registerTranslateCommand(
                 try {
                     const activeTab = vscode.window.tabGroups.activeTabGroup?.activeTab;
                     if (activeTab) {
-                        const input: any = activeTab.input;
-                        const tabUri: vscode.Uri | undefined = input && (input.uri || input.resource || input.localResource);
+                        const tabUri = getTabInputUri(activeTab.input);
                         if (tabUri && tabUri.scheme === 'file') {
                             try {
                                 document = await vscode.workspace.openTextDocument(tabUri);
                                 logFn(path.basename(tabUri.fsPath), `Using file from active tab: ${tabUri.fsPath}`);
-                            } catch (e) {
-                                // ignore and fall back
+                            } catch (error) {
+                                logFn('Translation', `Failed to open document from active tab: ${String(error)}`);
                             }
                         }
                     }
-                } catch (e) {
-                    // ignore
+                } catch (error) {
+                    logFn('Translation', `Failed to inspect active tab: ${String(error)}`);
                 }
 
                 const editor = vscode.window.activeTextEditor;
@@ -77,7 +94,7 @@ export function registerTranslateCommand(
                             const MAX_CHUNK = Math.max(100, Math.min(10000, Math.floor(Number(userMaxChunk) || 1000)));
                             logFn(docLabel, `Using max chunk size: ${MAX_CHUNK}`);
 
-                            function chunkText(t: string, maxLen = MAX_CHUNK): string[] {
+                            const chunkText = (t: string, maxLen = MAX_CHUNK): string[] => {
                                 const tokens = t.split(/(\s+)/);
                                 const chunks: string[] = [];
                                 let current = '';
@@ -99,12 +116,12 @@ export function registerTranslateCommand(
                                 }
                                 if (current.length) chunks.push(current);
                                 return chunks;
-                            }
+                            };
 
                             const chunks = chunkText(text, MAX_CHUNK);
                             logFn(docLabel, `Total chunks: ${chunks.length}`);
 
-                            async function translateChunks(chunks: string[], concurrency = 4): Promise<string> {
+                            const translateChunks = async (chunks: string[], concurrency = 4): Promise<string> => {
                                 const results: string[] = new Array(chunks.length);
                                 for (let i = 0; i < chunks.length; i += concurrency) {
                                     if (token.isCancellationRequested) {
@@ -129,7 +146,7 @@ export function registerTranslateCommand(
                                     await Promise.all(batch);
                                 }
                                 return results.join('');
-                            }
+                            };
 
                             const userConcurrency = settings.get<number>('concurrency', 20);
                             const concurrency = Math.max(1, Math.min(100, Math.floor(userConcurrency)));

@@ -93,8 +93,8 @@ export function listNotes(): void {
 }
 
 export function newNote(tree: NotesViewProvider, folder?: Note): void {
-	let notesLocation = folder ? path.join(folder.location, folder.name) : String(getNotesLocation());
-	let notesDefaultNoteExtension = String(getNotesDefaultNoteExtension());
+	const notesLocation = folder ? path.join(folder.location, folder.name) : String(getNotesLocation());
+	const notesDefaultNoteExtension = String(getNotesDefaultNoteExtension());
 
 	vscode.window.showInputBox({
 		prompt: '笔记名称？',
@@ -104,10 +104,10 @@ export function newNote(tree: NotesViewProvider, folder?: Note): void {
 			return;
 		}
 
-		let fileName: string = `${noteName}`;
-		let filePath: string = path.join(notesLocation, `${fileName.replace(/\:/gi, '')}.${notesDefaultNoteExtension}`);
-		let firstLine: string = "# " + fileName + "\n\n";
-		let noteExists = fs.existsSync(String(filePath));
+		const fileName: string = `${noteName}`;
+		const filePath: string = path.join(notesLocation, `${fileName.replace(/:/gi, '')}.${notesDefaultNoteExtension}`);
+		const firstLine: string = "# " + fileName + "\n\n";
+		const noteExists = fs.existsSync(String(filePath));
 
 		if (!noteExists) {
 			fs.writeFile(filePath, firstLine, err => {
@@ -116,7 +116,7 @@ export function newNote(tree: NotesViewProvider, folder?: Note): void {
 					return vscode.window.showErrorMessage('创建新笔记失败。');
 				}
 				else {
-					let file = vscode.Uri.file(filePath);
+					const file = vscode.Uri.file(filePath);
 					vscode.window.showTextDocument(file).then(() => {
 						vscode.commands.executeCommand('cursorMove', { 'to': 'viewPortBottom' });
 					});
@@ -131,7 +131,7 @@ export function newNote(tree: NotesViewProvider, folder?: Note): void {
 }
 
 export function newFolder(tree: NotesViewProvider, parentFolder?: Note): void {
-	let parentLocation = parentFolder ? path.join(parentFolder.location, parentFolder.name) : String(getNotesLocation());
+	const parentLocation = parentFolder ? path.join(parentFolder.location, parentFolder.name) : String(getNotesLocation());
 
 	vscode.window.showInputBox({
 		prompt: '文件夹名称？',
@@ -141,8 +141,8 @@ export function newFolder(tree: NotesViewProvider, parentFolder?: Note): void {
 			return;
 		}
 
-		let folderPath: string = path.join(parentLocation, folderName);
-		let folderExists = fs.existsSync(String(folderPath));
+		const folderPath: string = path.join(parentLocation, folderName);
+		const folderExists = fs.existsSync(String(folderPath));
 
 		if (!folderExists) {
 			fs.mkdir(folderPath, { recursive: true }, err => {
@@ -190,7 +190,7 @@ export function renameNote(note: Note, tree: NotesViewProvider): void {
 		return;
 	}
 
-	let noteExtension = note.name.split('.').pop();
+	const noteExtension = note.name.split('.').pop();
 
 	vscode.window.showInputBox({
 		prompt: '新笔记名称？',
@@ -200,7 +200,7 @@ export function renameNote(note: Note, tree: NotesViewProvider): void {
 			return;
 		}
 
-		let newNoteExtension = path.extname(newNoteName).replace('.', '');
+		const newNoteExtension = path.extname(newNoteName).replace('.', '');
 		let noteName: string = '';
 
 		if (String(getNotesExtensions()).split(',').includes(newNoteExtension)) {
@@ -213,7 +213,7 @@ export function renameNote(note: Note, tree: NotesViewProvider): void {
 			noteName = path.basename(newNoteName, path.extname(newNoteName)) + '.' + noteExtension;
 		}
 
-		let newNotePath = path.join(note.location, noteName);
+		const newNotePath = path.join(note.location, noteName);
 		if (fs.existsSync(newNotePath)) {
 			vscode.window.showWarningMessage(`'${noteName}' 已存在。`);
 			return;
@@ -238,7 +238,7 @@ export function renameFolder(folder: Note, tree: NotesViewProvider): void {
 			return;
 		}
 
-		let newFolderPath = path.join(folder.location, newFolderName);
+		const newFolderPath = path.join(folder.location, newFolderName);
 		if (fs.existsSync(newFolderPath)) {
 			vscode.window.showWarningMessage(`'${newFolderName}' 已存在。`);
 			return;
@@ -250,14 +250,14 @@ export function renameFolder(folder: Note, tree: NotesViewProvider): void {
 	});
 }
 
-export function setupNotes(tree?: NotesViewProvider): void {
+export function setupNotes(_tree?: NotesViewProvider): void {
 	const notesLocation = getNotesLocation();
 	if (notesLocation) {
 		vscode.commands.executeCommand('workbench.action.openSettings', `smartPageTranslator.notes`);
 		return;
 	}
 
-	let openDialogOptions: vscode.OpenDialogOptions = {
+	const openDialogOptions: vscode.OpenDialogOptions = {
 		canSelectFiles: false,
 		canSelectFolders: true,
 		canSelectMany: false,
@@ -266,7 +266,7 @@ export function setupNotes(tree?: NotesViewProvider): void {
 
 	vscode.window.showOpenDialog(openDialogOptions).then(fileUri => {
 		if (fileUri && fileUri[0]) {
-			let notesConfiguration = vscode.workspace.getConfiguration('smartPageTranslator');
+			const notesConfiguration = vscode.workspace.getConfiguration('smartPageTranslator');
 			notesConfiguration.update('notes.notesLocation', path.normalize(fileUri[0].fsPath), true).then(() => {
 				vscode.window.showWarningMessage(
 					`检测到存储位置已更改。需要重新加载窗口使更改生效。`,

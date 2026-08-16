@@ -32,7 +32,7 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 		private notesLocation: string,
 		private notesExtensions: string) {
 		this.notesLocation = expandHomePath(notesLocation);
-	};
+	}
 
 	public updateNotesLocation(notesLocation: string): void {
 		this.notesLocation = expandHomePath(notesLocation);
@@ -133,7 +133,7 @@ export class NotesViewProvider implements vscode.TreeDataProvider<Note> {
 	private pathExists(p: string): boolean {
 		try {
 			fs.accessSync(p);
-		} catch (err) {
+		} catch {
 			return false;
 		}
 		return true;
