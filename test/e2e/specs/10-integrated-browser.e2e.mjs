@@ -19,6 +19,13 @@ import {
 const realBrowserUrl = process.env.SPT_E2E_BROWSER_URL;
 
 describe('Smart Page Translator integrated browser E2E', () => {
+  before(async function () {
+    const vscodeVersion = await browser.getVSCodeVersion();
+    // TODO: wdio-vscode-service 8.0.0 在 VS Code 1.126/Linux 跟踪独立 Webview 时会随机关闭 Electron 主窗口；上游修复后移除此隔离。
+    if (process.platform === 'linux' && vscodeVersion.startsWith('1.126.')) {
+      this.skip();
+    }
+  });
   beforeEach(setupWorkbench);
   afterEach(cleanupWorkbench);
 

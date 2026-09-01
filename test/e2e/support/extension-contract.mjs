@@ -29,6 +29,7 @@ export const COMMANDS = {
     copyPath: 'smartPageTranslator.rootFiles.copyPath',
     cut: 'smartPageTranslator.rootFiles.cut',
     delete: 'smartPageTranslator.rootFiles.delete',
+    download: 'smartPageTranslator.rootFiles.download',
     newFile: 'smartPageTranslator.rootFiles.newFile',
     newFolder: 'smartPageTranslator.rootFiles.newFolder',
     open: 'smartPageTranslator.rootFiles.open',
@@ -37,7 +38,8 @@ export const COMMANDS = {
     refresh: 'smartPageTranslator.rootFiles.refresh',
     removeQuickPath: 'smartPageTranslator.rootFiles.removeQuickPath',
     rename: 'smartPageTranslator.rootFiles.rename',
-    revealInOS: 'smartPageTranslator.rootFiles.revealInOS'
+    revealInOS: 'smartPageTranslator.rootFiles.revealInOS',
+    uploadLocal: 'smartPageTranslator.rootFiles.uploadLocal'
   },
   // 仅供 E2E 使用的测试接缝，不注册到 package.json 的 UI commands。
   // 改名或删除时必须同步根 AGENTS.md 和相关 spec。
@@ -79,6 +81,7 @@ export const REQUIRED_COMMANDS = [
   COMMANDS.rootFiles.copyPath,
   COMMANDS.rootFiles.cut,
   COMMANDS.rootFiles.delete,
+  COMMANDS.rootFiles.download,
   COMMANDS.rootFiles.newFile,
   COMMANDS.rootFiles.newFolder,
   COMMANDS.rootFiles.open,
@@ -88,6 +91,7 @@ export const REQUIRED_COMMANDS = [
   COMMANDS.rootFiles.removeQuickPath,
   COMMANDS.rootFiles.rename,
   COMMANDS.rootFiles.revealInOS,
+  COMMANDS.rootFiles.uploadLocal,
   COMMANDS.notes.deleteNote,
   COMMANDS.notes.deleteFolder,
   COMMANDS.notes.listNotes,

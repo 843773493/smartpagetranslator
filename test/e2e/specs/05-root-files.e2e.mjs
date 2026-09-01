@@ -32,9 +32,21 @@ describe('Smart Page Translator root file tree E2E', () => {
     const copiedFile = path.join(copyTargetFolder, 'renamed.txt');
     const moveTargetFolder = path.join(sandboxDir, 'moved-files');
     const movedFile = path.join(moveTargetFolder, 'renamed.txt');
+    const localUploadSource = path.join(workspacePath, 'local-upload-source.txt');
+    const localUploadFolder = path.join(workspacePath, 'local-upload-folder');
+    const localUploadFolderFile = path.join(localUploadFolder, 'nested.txt');
+    const uploadedSource = path.join(sandboxDir, 'local-upload-source.txt');
+    const uploadedFolderFile = path.join(sandboxDir, 'local-upload-folder', 'nested.txt');
+    const clipboardUploadSource = path.join(workspacePath, 'clipboard-upload-source.txt');
+    const clipboardUploadedFile = path.join(sandboxDir, 'clipboard-upload-source.txt');
 
     fs.rmSync(sandboxDir, { recursive: true, force: true });
+    fs.rmSync(localUploadFolder, { recursive: true, force: true });
     fs.mkdirSync(sandboxDir, { recursive: true });
+    fs.mkdirSync(localUploadFolder, { recursive: true });
+    fs.writeFileSync(localUploadSource, 'uploaded through context menu command', 'utf8');
+    fs.writeFileSync(localUploadFolderFile, 'uploaded directory content', 'utf8');
+    fs.writeFileSync(clipboardUploadSource, 'uploaded through Ctrl+V command', 'utf8');
 
     await browser.executeWorkbench(
       async (vscode, args) => {
@@ -79,6 +91,21 @@ describe('Smart Page Translator root file tree E2E', () => {
     );
     const shortcutSnapshot = await collectUiSnapshot('root-file-tree-shortcut');
     assert.match(shortcutSnapshot.document.visibleText, /快捷路径|root-files-e2e/);
+
+    await browser.executeWorkbench(async (vscode, args) => {
+      await vscode.env.clipboard.writeText(args.sources.join('\n'));
+      await vscode.commands.executeCommand(args.paste, vscode.Uri.file(args.target));
+    }, {
+      paste: COMMANDS.rootFiles.paste,
+      sources: [localUploadSource, localUploadFolder, clipboardUploadSource],
+      target: sandboxDir
+    });
+    await waitForPath(uploadedSource, true);
+    await waitForPath(uploadedFolderFile, true);
+    await waitForPath(clipboardUploadedFile, true);
+    assert.equal(fs.readFileSync(uploadedSource, 'utf8'), 'uploaded through context menu command');
+    assert.equal(fs.readFileSync(uploadedFolderFile, 'utf8'), 'uploaded directory content');
+    assert.equal(fs.readFileSync(clipboardUploadedFile, 'utf8'), 'uploaded through Ctrl+V command');
 
     await executeCommandWithInputOnFile(COMMANDS.rootFiles.newFile, 'created.txt', sandboxDir);
     await waitForPath(createdFile, true);
@@ -141,5 +168,9 @@ describe('Smart Page Translator root file tree E2E', () => {
     await waitForPath(moveTargetFolder, false);
 
     await executeCommandOnFile(COMMANDS.rootFiles.removeQuickPath, sandboxDir);
+
+    fs.rmSync(localUploadSource, { force: true });
+    fs.rmSync(localUploadFolder, { recursive: true, force: true });
+    fs.rmSync(clipboardUploadSource, { force: true });
   });
 });

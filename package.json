@@ -2,7 +2,7 @@
   "name": "smart-page-translator",
   "displayName": "Smart Page Translator",
   "description": "Translate text in editor from English to Chinese",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "publisher": "843773493",
   "icon": "asset/icon.png",
   "homepage": "https://github.com/843773493/smartpagetranslator",
@@ -50,6 +50,8 @@
     "onCommand:smartPageTranslator.rootFiles.copy",
     "onCommand:smartPageTranslator.rootFiles.cut",
     "onCommand:smartPageTranslator.rootFiles.paste",
+    "onCommand:smartPageTranslator.rootFiles.uploadLocal",
+    "onCommand:smartPageTranslator.rootFiles.download",
     "onCommand:smartPageTranslator.rootFiles.addQuickPath",
     "onCommand:smartPageTranslator.rootFiles.removeQuickPath",
     "onCommand:smartPageTranslator.rootFiles.copyPath",
@@ -155,6 +157,18 @@
         "title": "粘贴",
         "category": "根目录文件树",
         "icon": "$(clippy)"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.uploadLocal",
+        "title": "上传...",
+        "category": "根目录文件树",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "smartPageTranslator.rootFiles.download",
+        "title": "下载...",
+        "category": "根目录文件树",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "smartPageTranslator.rootFiles.addQuickPath",
@@ -453,6 +467,16 @@
           "group": "3_clipboard@3"
         },
         {
+          "command": "smartPageTranslator.rootFiles.uploadLocal",
+          "when": "view == smart-page-translator-root-files && (viewItem == rootFilesRoot || viewItem == rootFilesShortcutRoot || viewItem == rootFilesFolder)",
+          "group": "3_clipboard@4"
+        },
+        {
+          "command": "smartPageTranslator.rootFiles.download",
+          "when": "view == smart-page-translator-root-files && (viewItem == rootFilesFolder || viewItem == rootFilesFile || viewItem == rootFilesHtmlFile)",
+          "group": "3_clipboard@5"
+        },
+        {
           "command": "smartPageTranslator.rootFiles.addQuickPath",
           "when": "view == smart-page-translator-root-files && (viewItem == rootFilesRoot || viewItem == rootFilesFolder)",
           "group": "4_shortcut@1"
@@ -650,6 +674,7 @@
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.41.0",
     "@typescript-eslint/parser": "^8.41.0",
+    "@vscode/vsce": "^3.9.2",
     "@wdio/cli": "9.29.1",
     "@wdio/devtools-service": "10.6.1",
     "@wdio/globals": "9.29.1",
@@ -663,7 +688,6 @@
     "expect-webdriverio": "5.6.9",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "@vscode/vsce": "^3.9.2",
     "wdio-vscode-service": "8.0.0",
     "webdriverio": "9.29.1"
   },
@@ -671,14 +695,9 @@
     "@babel/parser": "^7.29.2",
     "@babel/traverse": "^7.29.0",
     "bing-translate-api": "^3.0.1",
+    "fflate": "^0.8.3",
     "glob": "^11.0.0",
     "rimraf": "^6.0.0",
     "ws": "^8.21.0"
-  },
-  "files": [
-    "out/**/*",
-    "asset/**/*",
-    "README.md",
-    "LICENSE"
-  ]
+  }
 }

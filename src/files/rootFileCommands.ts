@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import { IntegratedBrowserManager } from '../browser/integratedBrowserManager';
+import { localFileClipboardFingerprint, readLocalFileClipboardUris } from './localFileClipboard';
+import { openLocalDownloadPanel } from './localDownloadPanel';
+import { openLocalUploadPanel } from './localUploadPanel';
 import { RootFileItem } from './rootFileItem';
 import { RootFileTreeProvider } from './rootFileTreeProvider';
 import { basenameOfUri, clipboardPathOfUri, displayPathOfUri, isHtmlUri, localRootUriOf, parentUriOf } from './rootFileUri';
@@ -9,6 +12,12 @@ type ClipboardMode = 'copy' | 'cut';
 type RootFileClipboard = {
 	readonly uri: vscode.Uri;
 	readonly mode: ClipboardMode;
+	readonly localClipboardFingerprint: string;
+};
+
+type PreparedCopyTarget = {
+	readonly uri: vscode.Uri;
+	readonly overwrite: boolean;
 };
 
 const DELETE_TO_TRASH = '移到回收站';
@@ -23,6 +32,7 @@ export function registerRootFileCommands(
 	browser: IntegratedBrowserManager
 ): void {
 	let clipboard: RootFileClipboard | undefined;
+	const canReadLocalClipboard = context.extension.extensionKind === vscode.ExtensionKind.UI;
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.refresh', (target?: FileCommandTarget) => {
@@ -86,7 +96,11 @@ export function registerRootFileCommands(
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.copy', async (target?: FileCommandTarget) => {
 			const uri = requireUri(target || selectedTreeItem(treeView));
-			clipboard = { uri, mode: 'copy' };
+			clipboard = {
+				uri,
+				mode: 'copy',
+				localClipboardFingerprint: await currentLocalClipboardFingerprint(canReadLocalClipboard)
+			};
 			void vscode.window.showInformationMessage(`已复制：${displayPathOfUri(uri)}`);
 		})
 	);
@@ -94,14 +108,33 @@ export function registerRootFileCommands(
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.cut', async (target?: FileCommandTarget) => {
 			const uri = requireUri(target || selectedTreeItem(treeView));
-			clipboard = { uri, mode: 'cut' };
+			clipboard = {
+				uri,
+				mode: 'cut',
+				localClipboardFingerprint: await currentLocalClipboardFingerprint(canReadLocalClipboard)
+			};
 			void vscode.window.showInformationMessage(`已剪切：${displayPathOfUri(uri)}`);
 		})
 	);
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('smartPageTranslator.rootFiles.paste', async (target?: FileCommandTarget) => {
-			const pasted = await pasteEntry(clipboard, target || selectedTreeItem(treeView));
+			const destinationTarget = target || selectedTreeItem(treeView);
+			const localClipboardUris = canReadLocalClipboard
+				? await readLocalFileClipboardUris()
+				: [];
+			const localClipboardChanged = localClipboardUris.length > 0
+				&& localFileClipboardFingerprint(localClipboardUris) !== clipboard?.localClipboardFingerprint;
+			if (localClipboardChanged) {
+				await uploadLocalEntries(localClipboardUris, destinationTarget, tree, treeView);
+				return;
+			}
+			if (!clipboard) {
+				await openRendererLocalUpload(destinationTarget, tree, treeView, 'paste');
+				return;
+			}
+
+			const pasted = await pasteEntry(clipboard, destinationTarget);
 			if (pasted) {
 				tree.refresh(tree.parentUri(pasted.target));
 				if (pasted.mode === 'cut') {
@@ -110,6 +143,21 @@ export function registerRootFileCommands(
 				}
 				await revealIfVisible(treeView, pasted.target);
 			}
+		})
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			'smartPageTranslator.rootFiles.uploadLocal',
+			async (target?: FileCommandTarget) => {
+				await openRendererLocalUpload(target || selectedTreeItem(treeView), tree, treeView, 'select');
+			}
+		)
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('smartPageTranslator.rootFiles.download', (target?: FileCommandTarget) => {
+			openLocalDownloadPanel(requireUri(target || selectedTreeItem(treeView)));
 		})
 	);
 
@@ -296,50 +344,143 @@ async function pasteEntry(
 		return undefined;
 	}
 
-	const pastedName = basenameOfUri(source);
-	let targetUri = vscode.Uri.joinPath(destinationDirectory, pastedName);
-	let overwrite = false;
-
-	if (await pathExists(targetUri)) {
-		const selected = await vscode.window.showWarningMessage(
-			`'${pastedName}' 已存在。`,
-			{ modal: true },
-			OVERWRITE,
-			RENAME
-		);
-
-		if (selected === OVERWRITE) {
-			if (isSameUri(source, targetUri)) {
-				void vscode.window.showWarningMessage('源路径和目标路径相同，不能覆盖自身。');
-				return undefined;
-			}
-			overwrite = true;
-		} else if (selected === RENAME) {
-			const newName = await askEntryName('粘贴为？', pastedName, destinationDirectory);
-			if (!newName) {
-				return undefined;
-			}
-			targetUri = vscode.Uri.joinPath(destinationDirectory, newName);
-			if (await pathExists(targetUri)) {
-				void vscode.window.showWarningMessage(`'${newName}' 已存在。`);
-				return undefined;
-			}
-		} else {
-			return undefined;
-		}
+	const preparedTarget = await prepareCopyTarget(source, destinationDirectory, '粘贴为？');
+	if (!preparedTarget) {
+		return undefined;
 	}
 
 	try {
 		if (clipboard.mode === 'copy') {
-			await copyEntry(source, targetUri, sourceStat, overwrite);
+			await copyEntry(source, preparedTarget.uri, sourceStat, preparedTarget.overwrite);
 		} else {
-			await moveEntry(source, targetUri, sourceStat, overwrite);
+			await moveEntry(source, preparedTarget.uri, sourceStat, preparedTarget.overwrite);
 		}
-		return { source, target: targetUri, mode: clipboard.mode };
+		return { source, target: preparedTarget.uri, mode: clipboard.mode };
 	} catch (err) {
 		await showFileOperationError(clipboard.mode === 'copy' ? '复制粘贴失败' : '剪切粘贴失败', err);
 		return undefined;
 	}
+}
+
+async function openRendererLocalUpload(
+	target: FileCommandTarget,
+	tree: RootFileTreeProvider,
+	treeView: vscode.TreeView<RootFileItem>,
+	mode: 'select' | 'paste'
+): Promise<void> {
+	const destinationDirectory = await resolveDirectory(target);
+	openLocalUploadPanel(destinationDirectory, async uploadedUris => {
+		if (uploadedUris.length === 0) {
+			return;
+		}
+		tree.refresh(destinationDirectory);
+		await revealIfVisible(treeView, uploadedUris[uploadedUris.length - 1]);
+		void vscode.window.showInformationMessage(
+			`已上传 ${uploadedUris.length} 个文件到：${displayPathOfUri(destinationDirectory)}`
+		);
+	}, mode);
+}
+
+async function uploadLocalEntries(
+	sources: readonly vscode.Uri[],
+	target: FileCommandTarget,
+	tree: RootFileTreeProvider,
+	treeView: vscode.TreeView<RootFileItem>
+): Promise<void> {
+	const destinationDirectory = await resolveDirectory(target);
+	const localSources = sources.filter(source => source.scheme === 'file');
+	if (localSources.length !== sources.length) {
+		void vscode.window.showWarningMessage('所选内容不是可上传的本地文件或文件夹。');
+	}
+	if (localSources.length === 0) {
+		return;
+	}
+
+	const uploaded = await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: `正在上传 ${localSources.length} 个本地项目`,
+		cancellable: false
+	}, async progress => {
+		const uploadedUris: vscode.Uri[] = [];
+		for (const source of localSources) {
+			progress.report({ message: basenameOfUri(source) });
+			try {
+				const sourceStat = await vscode.workspace.fs.stat(source);
+				if (isDirectory(sourceStat) && isSameOrChildUri(source, destinationDirectory)) {
+					void vscode.window.showWarningMessage(`不能把 '${basenameOfUri(source)}' 上传到自身或其子目录。`);
+					continue;
+				}
+
+				const preparedTarget = await prepareCopyTarget(source, destinationDirectory, '上传为？');
+				if (!preparedTarget) {
+					continue;
+				}
+				await copyEntry(source, preparedTarget.uri, sourceStat, preparedTarget.overwrite);
+				uploadedUris.push(preparedTarget.uri);
+			} catch (err) {
+				await showFileOperationError(`上传 '${basenameOfUri(source)}' 失败`, err);
+			}
+		}
+		return uploadedUris;
+	});
+
+	if (uploaded.length === 0) {
+		return;
+	}
+
+	tree.refresh(destinationDirectory);
+	await revealIfVisible(treeView, uploaded[uploaded.length - 1]);
+	void vscode.window.showInformationMessage(`已上传 ${uploaded.length} 个本地项目到：${displayPathOfUri(destinationDirectory)}`);
+}
+
+async function prepareCopyTarget(
+	source: vscode.Uri,
+	destinationDirectory: vscode.Uri,
+	renamePrompt: string
+): Promise<PreparedCopyTarget | undefined> {
+	const sourceName = basenameOfUri(source);
+	if (!sourceName) {
+		void vscode.window.showWarningMessage('不能上传或粘贴文件系统根目录。');
+		return undefined;
+	}
+	let targetUri = vscode.Uri.joinPath(destinationDirectory, sourceName);
+	if (!await pathExists(targetUri)) {
+		return { uri: targetUri, overwrite: false };
+	}
+
+	const selected = await vscode.window.showWarningMessage(
+		`'${sourceName}' 已存在。`,
+		{ modal: true },
+		OVERWRITE,
+		RENAME
+	);
+	if (selected === OVERWRITE) {
+		if (isSameUri(source, targetUri)) {
+			void vscode.window.showWarningMessage('源路径和目标路径相同，不能覆盖自身。');
+			return undefined;
+		}
+		return { uri: targetUri, overwrite: true };
+	}
+	if (selected !== RENAME) {
+		return undefined;
+	}
+
+	const newName = await askEntryName(renamePrompt, sourceName, destinationDirectory);
+	if (!newName) {
+		return undefined;
+	}
+	targetUri = vscode.Uri.joinPath(destinationDirectory, newName);
+	if (await pathExists(targetUri)) {
+		void vscode.window.showWarningMessage(`'${newName}' 已存在。`);
+		return undefined;
+	}
+	return { uri: targetUri, overwrite: false };
+}
+
+async function currentLocalClipboardFingerprint(canReadLocalClipboard: boolean): Promise<string> {
+	return canReadLocalClipboard
+		? localFileClipboardFingerprint(await readLocalFileClipboardUris())
+		: '';
 }
 
 async function copyEntry(
